@@ -1,18 +1,23 @@
 import os
+import io
+import csv
+import pint
 import json
 import uuid
+import random
+import string
 from functools import wraps
 from dotenv import load_dotenv
-from flask import Flask, render_template, redirect, url_for, request, flash, session, abort, jsonify
+from datetime import datetime, timezone
+from flask import Flask, render_template, redirect, url_for, request, flash, session, abort, jsonify, Response
 from flask_session import Session
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user, user_logged_in
 from models import db, bcrypt, User, Company, Role, Location, Permission, Category, Department, Equipment, Unit, Currency, InventoryItem, Vendor, VendorContact
 from sqlalchemy import func, cast, text, case
 import pycountry
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import joinedload, aliased
 from werkzeug.utils import secure_filename
-import pint
 from sqlalchemy.dialects.postgresql import JSONB
 
 load_dotenv()
@@ -130,10 +135,10 @@ def create_default_roles_and_permissions(company_id):
     db.session.commit()
 
     roles_config = {
-        'Admin': {'desc': 'Full access to all system features.', 'is_admin': True, 'perms': permission_names},
-        'Manager': {'desc': 'Can manage work orders, assets, and users.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_CREATE_WORK_ORDER', 'CAN_EDIT_WORK_ORDER', 'CAN_MANAGE_ASSETS', 'CAN_MANAGE_USERS', 'CAN_MANAGE_CATEGORIES', 'CAN_MANAGE_DEPARTMENTS', 'CAN_MANAGE_LOCATIONS', 'CAN_MANAGE_EQUIPMENT', 'CAN_MANAGE_UNITS', 'CAN_MANAGE_CURRENCIES', 'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS']},
-        'Technician': {'desc': 'Can view and update assigned work orders.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_EDIT_WORK_ORDER']},
-        'Viewer': {'desc': 'Read-only access to dashboards and reports.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_VIEW_REPORTS']}
+        'Admin': {'desc': 'Full access to all system features.', 'is_admin': True, 'perms': permission_names, 'level': 0},
+        'Manager': {'desc': 'Can manage work orders, assets, and users.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_CREATE_WORK_ORDER', 'CAN_EDIT_WORK_ORDER', 'CAN_MANAGE_ASSETS', 'CAN_MANAGE_USERS', 'CAN_MANAGE_CATEGORIES', 'CAN_MANAGE_DEPARTMENTS', 'CAN_MANAGE_LOCATIONS', 'CAN_MANAGE_EQUIPMENT', 'CAN_MANAGE_UNITS', 'CAN_MANAGE_CURRENCIES', 'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS'], 'level': 10},
+        'Technician': {'desc': 'Can view and update assigned work orders.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_EDIT_WORK_ORDER'], 'level': 20},
+        'Viewer': {'desc': 'Read-only access to dashboards and reports.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_VIEW_REPORTS'], 'level': 30}
     }
 
     for name, config in roles_config.items():
@@ -141,7 +146,8 @@ def create_default_roles_and_permissions(company_id):
             company_id=company_id,
             name=name,
             description=config['desc'],
-            is_admin=config['is_admin']
+            is_admin=config['is_admin'],
+            level=config['level']
         )
         role.permissions = [p for p in all_permissions if p.name in config['perms']]
         db.session.add(role)
@@ -253,6 +259,20 @@ def create_default_roles_and_permissions(company_id):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+@user_logged_in.connect_via(app)
+def on_user_logged_in(sender, user):
+    """
+    Signal listener that runs every time a user successfully logs in.
+    Updates the `last_login` timestamp for the user.
+    """
+    try:
+        user.last_login = datetime.now(timezone.utc)
+        db.session.commit()
+    except Exception as e:
+        # In case of a database issue, roll back and log the error
+        db.session.rollback()
+        print(f"Error updating last_login for user {user.id}: {e}")
+
 def super_admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -349,51 +369,69 @@ def signup_step2_key():
 
 @app.route('/signup/complete', methods=['GET', 'POST'])
 def signup_step3_details():
+    """Step 3: User enters details and the account is created."""
     signup_data = session.get('signup_data')
+
+    # Protect route: ensure user came from step 2 (email and key verified)
     if not signup_data or not signup_data.get('key_verified'):
+        flash('Please complete the previous signup steps first.', 'info')
         return redirect(url_for('signup_step1_email'))
 
     if request.method == 'POST':
+        # --- 1. Data Collection and Validation ---
         username = request.form.get('username')
         first_name = request.form.get('first_name')
         last_name = request.form.get('last_name')
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
 
+        if not all([username, first_name, last_name, password, confirm_password]):
+            flash('All fields are required.', 'danger')
+            return render_template('signup/step3_details.html', data=signup_data, hide_sidebar=True)
+
         if password != confirm_password:
             flash('Passwords do not match.', 'danger')
-            return redirect(url_for('signup_step3_details'))
+            return render_template('signup/step3_details.html', data=signup_data, hide_sidebar=True)
 
+        # Check for uniqueness of username and email in the DB
         if User.query.filter_by(username=username).first():
             flash('That username is already taken. Please choose another.', 'warning')
-            return redirect(url_for('signup_step3_details'))
+            return render_template('signup/step3_details.html', data=signup_data, hide_sidebar=True)
         if User.query.filter_by(email=signup_data['email']).first():
             flash('An account with this email already exists.', 'warning')
             return redirect(url_for('login'))
 
+        # --- 2. Company and User Limit Check ---
         company = Company.query.filter_by(name=signup_data['company_name']).first()
         if not company:
+            # First user from this company is signing up, so create the company record
             company = Company(
                 name=signup_data['company_name'],
                 user_limit=signup_data['users_allowed']
             )
             db.session.add(company)
-            db.session.flush()
+            db.session.flush() # Flush to get the new company.id before creating defaults
             create_default_roles_and_permissions(company.id)
         else:
+            # Company exists, check if user limit has been reached
             user_count = User.query.filter_by(company_id=company.id).count()
             if user_count >= company.user_limit:
-                flash('The maximum number of users for your organization has been reached.', 'danger')
+                flash('The maximum number of users for your organization has been reached. Please contact your administrator.', 'danger')
                 return redirect(url_for('login'))
 
+        # --- 3. Find Default Role and Department for the new Admin ---
         admin_role = Role.query.filter_by(company_id=company.id, name='Admin').first()
-        if not admin_role:
-            flash('Critical error: Admin role not found for company.', 'danger')
+        management_dept = Department.query.filter_by(company_id=company.id, name='Management').first()
+
+        if not admin_role or not management_dept:
+            flash('A critical error occurred while setting up the company. Default role or department not found.', 'danger')
             return redirect(url_for('login'))
 
+        # --- 4. Create the new User ---
         new_user = User(
             company_id=company.id,
             role_id=admin_role.id,
+            department_id=management_dept.id,
             username=username,
             email=signup_data['email'],
             first_name=first_name,
@@ -403,16 +441,40 @@ def signup_step3_details():
         db.session.add(new_user)
         db.session.commit()
 
-        session.pop('signup_data', None)
+        # --- 5. Finalize ---
+        session.pop('signup_data', None) # Clean up session data
         flash('Your account has been created successfully! You can now log in.', 'success')
         return redirect(url_for('login'))
-        
+
+    # For a GET request, just show the form
     return render_template('signup/step3_details.html', data=signup_data, hide_sidebar=True)
 
 @app.route('/')
 @login_required
 def index():
     return render_template('index.html')
+
+# --- MIDDLEWARE FOR FORCING PASSWORD CHANGE ---
+
+@app.before_request
+def check_password_reset_required():
+    """
+    Runs before every request. If the user is logged in and needs to reset
+    their password, it redirects them to the change_password page.
+    """
+    # 1. Check if the user is authenticated and the flag is set
+    if current_user.is_authenticated and current_user.password_reset_required:
+        
+        # 2. Define a list of "allowed" pages the user can visit
+        #    They must be able to access the change password page and logout
+        allowed_endpoints = ['change_password', 'logout', 'static']
+        
+        # 3. If they are trying to go somewhere else, redirect them
+        if request.endpoint not in allowed_endpoints:
+            flash('For your security, you must change your temporary password before proceeding.', 'warning')
+            return redirect(url_for('change_password'))
+        
+# --- ROLE MANAGEMENT ROUTES ---
 
 @app.route('/roles')
 @login_required
@@ -464,6 +526,363 @@ def edit_role(role_id):
 
     all_permissions = Permission.query.all()
     return render_template('roles/edit_role.html', role=role, all_permissions=all_permissions)
+
+# --- USER MANAGEMENT ROUTES ---
+
+@app.route('/users')
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def manage_users():
+    search_query = request.args.get('q', '').strip()
+    
+    # Base query for all users in the current user's company
+    query = User.query.filter(User.company_id == current_user.company_id)
+    
+    # Join with the Role table to filter out any user who has an admin role
+    # This ensures Admins do not appear in the management list.
+    query = query.join(User.role).filter(Role.is_admin == False)
+
+    # Eagerly load Role and Department relationships to prevent the N+1 query problem
+    # and make the data available in the template without extra database hits.
+    query = query.options(
+        joinedload(User.role),
+        joinedload(User.department)
+    )
+
+    if search_query:
+        search_term = f"%{search_query}%"
+        # Search by username, first name, last name, or email
+        query = query.filter(
+            db.or_(
+                User.username.ilike(search_term),
+                User.first_name.ilike(search_term),
+                User.last_name.ilike(search_term),
+                User.email.ilike(search_term)
+            )
+        )
+
+    # Order the results for consistent display
+    users_list = query.order_by(User.first_name, User.last_name).all()
+    
+    return render_template(
+        'users/index.html',
+        users_list=users_list,
+        search_query=search_query
+    )
+    
+def generate_random_password(length=12):
+    """Generates a secure, random password."""
+    characters = string.ascii_letters + string.digits + string.punctuation
+    # Ensure the password has at least one of each character type for complexity
+    password = [
+        random.choice(string.ascii_lowercase),
+        random.choice(string.ascii_uppercase),
+        random.choice(string.digits),
+        random.choice(string.punctuation)
+    ]
+    # Fill the rest of the password length with random characters
+    for _ in range(length - len(password)):
+        password.append(random.choice(characters))
+    
+    # Shuffle the list to ensure randomness and join to form the final password string
+    random.shuffle(password)
+    return "".join(password)
+
+def generate_unique_username(first_name, company_id):
+    """Generates a unique username based on the first name, avoiding collisions."""
+    # Sanitize the first name to create a base username
+    base_username = ''.join(filter(str.isalnum, first_name.lower()))
+    if not base_username: # Fallback if name has no alphanumeric characters
+        base_username = 'user'
+        
+    username = base_username
+    counter = 1
+    # Check if the generated username already exists in the company
+    while User.query.filter_by(company_id=company_id, username=username).first():
+        username = f"{base_username}{counter}"
+        counter += 1
+    return username
+
+@app.route('/users/download-template')
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def download_user_template():
+    """Generates and serves a CSV template for bulk user import."""
+    
+    # --- Define CSV headers ---
+    headers = ["FirstName", "LastName", "Email", "Role", "Department", "Phone"]
+    
+    # --- Create a CSV in memory ---
+    # Using io.StringIO allows us to treat a string as a file
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write the header row
+    writer.writerow(headers)
+    
+    # Write an example row to guide the user
+    example_row = ["John", "Doe", "john.doe@example.com", "Technician", "Maintenance", "555-1234"]
+    writer.writerow(example_row)
+    
+    # --- Prepare the response for download ---
+    # We need to get the content of our in-memory file
+    output.seek(0)
+    
+    return Response(
+        output,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=user_import_template.csv"}
+    )
+
+@app.route('/users/add', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def add_user():
+    # Fetch data needed for the form's dropdowns
+    form_data = get_profile_form_data() 
+
+    if request.method == 'POST':
+        first_name = request.form.get('first_name', '').strip()
+        email = request.form.get('email', '').strip()
+        role_id = request.form.get('role_id')
+
+        # --- Validation ---
+        if not all([first_name, email, role_id]):
+            flash('First Name, Email, and Role are required fields.', 'danger')
+            return render_template('users/form.html', form_data=form_data, user=None)
+        
+        # Check for unique email within the current user's company
+        if User.query.filter_by(company_id=current_user.company_id, email=email).first():
+            flash(f'A user with the email "{email}" already exists in this company.', 'warning')
+            return render_template('users/form.html', form_data=form_data, user=None)
+
+        # --- Generate Data ---
+        username = generate_unique_username(first_name, current_user.company_id)
+        password = generate_random_password()
+
+        # --- Create User Object ---
+        try:
+            new_user = User(
+                company_id=current_user.company_id,
+                first_name=first_name,
+                last_name=request.form.get('last_name', '').strip(),
+                username=username,
+                email=email,
+                role_id=role_id,
+                department_id=request.form.get('department_id') or None,
+                phone=request.form.get('phone', '').strip(),
+                is_active='is_active' in request.form,
+                password_reset_required=True
+            )
+            new_user.set_password(password)
+            db.session.add(new_user)
+            db.session.commit()
+
+            # --- Success Feedback ---
+            # Use specific categories to allow for different styling/icons in the template
+            flash(f'User "{first_name}" created successfully! Please provide them with their login credentials below.', 'success')
+            flash(f'Username: {username}', 'info')
+            # Use a special category 'password'
+            flash(f'{password}', 'password')
+            
+            return redirect(url_for('manage_users'))
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'An error occurred while creating the user: {e}', 'danger')
+
+    return render_template('users/form.html', form_data=form_data, user=None)
+
+@app.route('/users/bulk-import', methods=['POST'])
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def bulk_import_users():
+    if 'csv_file' not in request.files:
+        flash('No file part in the request.', 'danger')
+        return redirect(url_for('add_user'))
+    
+    file = request.files['csv_file']
+    if file.filename == '' or not file.filename.endswith('.csv'):
+        flash('Please select a valid .csv file to upload.', 'danger')
+        return redirect(url_for('add_user'))
+
+    created_count = 0
+    error_count = 0
+    
+    # --- THIS IS NEW: Store credentials for the download ---
+    new_user_credentials = []
+
+    try:
+        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+        csv_reader = csv.DictReader(stream)
+
+        company_roles = {role.name.lower(): role for role in Role.query.filter_by(company_id=current_user.company_id).all()}
+        company_depts = {dept.name.lower(): dept for dept in Department.query.filter_by(company_id=current_user.company_id).all()}
+
+        for row_num, row in enumerate(csv_reader, 2): # Start from line 2 for error reporting
+            first_name = row.get('FirstName', '').strip()
+            email = row.get('Email', '').strip()
+            role_name = row.get('Role', '').strip()
+
+            if not all([first_name, email, role_name]):
+                error_count += 1
+                flash(f"Skipping row {row_num}: Missing required fields (FirstName, Email, Role).", 'warning')
+                continue
+            
+            if User.query.filter_by(company_id=current_user.company_id, email=email).first():
+                error_count += 1
+                flash(f"Skipping row {row_num}: User with email '{email}' already exists.", 'warning')
+                continue
+
+            role = company_roles.get(role_name.lower())
+            if not role:
+                error_count += 1
+                flash(f"Skipping row {row_num}: Role '{role_name}' does not exist.", 'warning')
+                continue
+
+            dept_name = row.get('Department', '').strip()
+            department = company_depts.get(dept_name.lower()) if dept_name else None
+            
+            username = generate_unique_username(first_name, current_user.company_id)
+            password = generate_random_password()
+            
+            new_user = User(
+                company_id=current_user.company_id,
+                first_name=first_name,
+                last_name=row.get('LastName', '').strip(),
+                email=email,
+                username=username,
+                role_id=role.id,
+                department_id=department.id if department else None,
+                phone=row.get('Phone', '').strip(),
+                is_active=True,
+                password_reset_required=True
+            )
+            new_user.set_password(password)
+            db.session.add(new_user)
+            created_count += 1
+            
+            # --- ADD TO OUR CREDENTIALS LIST ---
+            new_user_credentials.append({
+                'FirstName': first_name,
+                'LastName': row.get('LastName', '').strip(),
+                'Email': email,
+                'Username': username,
+                'Password': password
+            })
+
+        db.session.commit()
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'A critical error occurred during the import process: {e}', 'danger')
+        return redirect(url_for('add_user'))
+
+    # --- 2. Generate and Serve the Credentials File ---
+    if created_count > 0:
+        flash(f'Successfully imported {created_count} new users. Please download the credentials file.', 'success')
+        
+        # Create a new CSV in memory for the output
+        output = io.StringIO()
+        fieldnames = ['FirstName', 'LastName', 'Email', 'Username', 'Password']
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        
+        writer.writeheader()
+        writer.writerows(new_user_credentials)
+        
+        output.seek(0)
+        
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment;filename=new_user_credentials_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.csv"}
+        )
+    
+    # If only errors occurred, just redirect with the error messages
+    if error_count > 0:
+        flash(f'Import failed. Skipped {error_count} rows due to errors. Please check warnings and try again.', 'danger')
+
+    return redirect(url_for('manage_users'))
+
+@app.route('/users/view/<int:user_id>')
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def view_user_profile(user_id):
+    user = User.query.options(joinedload(User.role), joinedload(User.department)).get_or_404(user_id)
+    if user.company_id != current_user.company_id:
+        abort(403)
+    # Re-use the existing profile template
+    return render_template('profile/view.html', user=user)
+
+
+@app.route('/users/edit/<int:user_id>', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def edit_user(user_id):
+    user_to_edit = User.query.get_or_404(user_id)
+    
+    # --- Security Checks ---
+    # 1. User must be in the same company
+    if user_to_edit.company_id != current_user.company_id:
+        abort(403)
+    # 2. An admin cannot be edited from this page
+    if user_to_edit.role and user_to_edit.role.is_admin:
+        flash('Administrator accounts cannot be edited from this page.', 'warning')
+        next_url = request.form.get('next_url') or url_for('manage_users')
+        return redirect(next_url)
+
+    # --- Hierarchical Permission Check ---
+    is_current_user_admin = current_user.role and current_user.role.is_admin
+    # You can manage the user if you're an admin OR your role level is higher (lower number)
+    can_manage_user = is_current_user_admin or (current_user.role.level < user_to_edit.role.level)
+    
+    if not can_manage_user:
+        flash('You do not have permission to edit this user.', 'danger')
+        next_url = request.form.get('next_url') or url_for('manage_users')
+        return redirect(next_url)
+
+    if request.method == 'POST':
+        # --- Uniqueness validation for username ---
+        new_username = request.form.get('username')
+        existing_user = User.query.filter(User.username == new_username, User.id != user_to_edit.id, User.company_id == current_user.company_id).first()
+        if existing_user:
+            flash('That username is already taken. Please choose another.', 'warning')
+            form_data = get_profile_form_data()
+            return render_template('profile/edit.html', user=user_to_edit, is_admin=is_current_user_admin, form_data=form_data)
+
+        # --- Update Fields ---
+        user_to_edit.username = new_username
+        user_to_edit.first_name = request.form.get('first_name')
+        user_to_edit.last_name = request.form.get('last_name')
+        user_to_edit.phone = request.form.get('phone')
+
+        # --- Admin-only updatable fields ---
+        if is_current_user_admin:
+            user_to_edit.department_id = request.form.get('department_id') or None
+            user_to_edit.role_id = request.form.get('role_id') or None
+            user_to_edit.is_active = 'is_active' in request.form
+            
+            # An admin can change another user's email
+            new_email = request.form.get('email')
+            if new_email and new_email != user_to_edit.email:
+                # Check if the new email is already taken
+                existing_email_user = User.query.filter(User.email == new_email, User.company_id == current_user.company_id).first()
+                if existing_email_user:
+                    flash(f'The email "{new_email}" is already in use.', 'warning')
+                    form_data = get_profile_form_data()
+                    return render_template('profile/edit.html', user=user_to_edit, is_admin=is_current_user_admin, form_data=form_data)
+                user_to_edit.email = new_email
+        
+        db.session.commit()
+        flash(f'Profile for "{user_to_edit.username}" has been updated successfully.', 'success')
+        return redirect(url_for('manage_users'))
+
+    # For a GET request, get the data needed for dropdowns
+    form_data = get_profile_form_data()
+    # Re-use the existing profile edit template
+    next_url = request.args.get('next', url_for('manage_users'))
+    form_data = get_profile_form_data()
+    return render_template('profile/edit.html', user=user_to_edit, is_admin=is_current_user_admin, form_data=form_data, next_url=next_url)
 
 # --- CATEGORY MANAGEMENT ROUTES ---
 
@@ -1903,6 +2322,151 @@ def delete_vendor(vendor_id):
     db.session.commit()
     flash(f'Vendor "{vendor.name}" has been deleted.', 'success')
     return redirect(url_for('manage_vendors'))
+
+# --- USER PROFILE ROUTE ---
+
+def get_profile_form_data():
+    """Helper to fetch data for the profile edit form's dropdowns."""
+    company_id = current_user.company_id
+    return {
+        'departments': Department.query.filter_by(company_id=company_id, is_active=True).order_by(Department.name).all(),
+        'roles': Role.query.filter_by(company_id=company_id).order_by(Role.name).all()
+    }
+
+@app.route('/profile')
+@login_required
+def view_profile():
+    user = User.query.options(
+        joinedload(User.role),
+        joinedload(User.department)
+    ).get(current_user.id)
+    
+    return render_template('profile/view.html', user=user)
+
+@app.route('/profile/edit', methods=['GET', 'POST'])
+@login_required
+def edit_profile():
+    user = User.query.get_or_404(current_user.id)
+    is_admin = current_user.role and current_user.role.is_admin
+
+    if request.method == 'POST':
+        # --- Fields anyone can change ---
+        user.username = request.form.get('username')
+        user.first_name = request.form.get('first_name')
+        user.last_name = request.form.get('last_name')
+        user.phone = request.form.get('phone')
+
+        # --- Admin-only fields ---
+        if is_admin:
+            user.department_id = request.form.get('department_id') or None
+            user.role_id = request.form.get('role_id') or None
+            # Handle is_active checkbox (value is only sent if checked)
+            user.is_active = 'is_active' in request.form
+        
+        # --- Uniqueness validation ---
+        # Check if new username is unique (and not the user's current username)
+        existing_user = User.query.filter(User.username == user.username, User.id != user.id).first()
+        if existing_user:
+            flash('That username is already taken. Please choose another.', 'warning')
+            # We need to re-fetch form data if validation fails
+            form_data = get_profile_form_data()
+            return render_template('profile/edit.html', user=user, is_admin=is_admin, form_data=form_data)
+
+        db.session.commit()
+        flash('Your profile has been updated successfully.', 'success')
+        return redirect(url_for('view_profile'))
+
+    # For a GET request, get the data needed for dropdowns
+    form_data = get_profile_form_data() if is_admin else None
+    return render_template('profile/edit.html', user=user, is_admin=is_admin, form_data=form_data)
+
+@app.route('/profile/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    if request.method == 'POST':
+        current_password = request.form.get('current_password')
+        new_password = request.form.get('new_password')
+        confirm_new_password = request.form.get('confirm_new_password')
+
+        # --- 1. Validate inputs ---
+        if not all([current_password, new_password, confirm_new_password]):
+            flash('All fields are required.', 'danger')
+            return redirect(url_for('change_password'))
+
+        # --- 2. Check if the current password is correct ---
+        if not current_user.check_password(current_password):
+            flash('Your current password is incorrect.', 'danger')
+            return redirect(url_for('change_password'))
+
+        # --- 3. Check if the new password and confirmation match ---
+        if new_password != confirm_new_password:
+            flash('New password and confirmation do not match.', 'danger')
+            return redirect(url_for('change_password'))
+        
+        # --- 4. Update the password ---
+        current_user.set_password(new_password)
+        current_user.password_reset_required = False
+        db.session.commit()
+        
+        flash('Your password has been updated successfully.', 'success')
+        return redirect(url_for('view_profile'))
+
+    return render_template('profile/change_password.html')
+
+@app.route('/user/delete/<int:user_id>', methods=['POST'])
+@login_required
+def delete_user(user_id):
+    user_to_delete = User.query.get_or_404(user_id)
+    is_admin = current_user.role and current_user.role.is_admin
+    is_self = current_user.id == user_to_delete.id
+
+    # --- PERMISSION CHECKS ---
+    
+    # 1. A non-admin cannot delete another user.
+    if not is_admin and not is_self:
+        abort(403) # Forbidden
+
+    # 2. A user (even an admin) can only delete users within their own company.
+    if user_to_delete.company_id != current_user.company_id:
+        abort(403)
+
+    # 3. Prevent the last admin in a company from deleting themselves.
+    if is_self and is_admin:
+        admin_count = User.query.join(Role).filter(
+            User.company_id == current_user.company_id,
+            Role.is_admin == True
+        ).count()
+        if admin_count <= 1:
+            flash('You cannot delete the last administrator account for this company.', 'danger')
+            return redirect(url_for('view_profile'))
+
+    # If all checks pass, proceed with deletion
+    try:
+        # Future-proofing: Reassign or nullify work orders, etc., before deleting
+        # For example: WorkOrder.query.filter_by(assigned_technician_id=user_to_delete.id).update({'assigned_technician_id': None})
+
+        db.session.delete(user_to_delete)
+        db.session.commit()
+        
+        if is_self:
+            # If the user deleted themselves, log them out
+            logout_user()
+            flash('Your account has been successfully deleted.', 'success')
+            return redirect(url_for('login'))
+        else:
+            # If an admin deleted another user
+            flash(f'User "{user_to_delete.username}" has been successfully deleted.', 'success')
+            # --- THIS IS THE FIX ---
+            return redirect(url_for('manage_users'))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'An error occurred while deleting the account: {e}', 'danger')
+        if is_self:
+            return redirect(url_for('view_profile'))
+        else:
+            # Redirect to user management page in the future
+            return redirect(url_for('manage_users'))
 
 # --- SUPERADMIN ROUTES ---
 

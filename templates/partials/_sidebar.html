@@ -21,7 +21,7 @@
             </li>
             
             <!-- Assets Dropdown -->
-            {% set assets_endpoints = ['manage_equipment', 'add_equipment', 'edit_equipment', 'manage_inventory', 'add_inventory_item', 'edit_inventory_item'] %}
+            {% set assets_endpoints = ['manage_equipment', 'add_equipment', 'edit_equipment', 'view_equipment', 'manage_inventory', 'add_inventory_item', 'edit_inventory_item', 'view_inventory_item'] %}
             <li class="sidebar-item {% if request.endpoint in assets_endpoints %}active{% endif %}">
                 <a class="sidebar-link {{ '' if request.endpoint in assets_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#assetsCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in assets_endpoints else 'false' }}" aria-controls="assetsCollapse">
                     <i class="bi bi-box-seam"></i>
@@ -30,10 +30,10 @@
                 </a>
                 <div class="collapse {{ 'show' if request.endpoint in assets_endpoints }}" id="assetsCollapse">
                     <ul class="sidebar-submenu">
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_equipment', 'add_equipment', 'edit_equipment'] %}active{% endif %}">
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_equipment', 'add_equipment', 'edit_equipment', 'view_equipment'] %}active{% endif %}">
                             <a href="{{ url_for('manage_equipment') }}" class="sidebar-link">Equipment</a>
                         </li>   
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_inventory', 'add_inventory_item', 'edit_inventory_item'] %}active{% endif %}">
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_inventory', 'add_inventory_item', 'edit_inventory_item', 'view_inventory_item'] %}active{% endif %}">
                             <a href="{{ url_for('manage_inventory') }}" class="sidebar-link">Inventory</a>
                         </li>
                     </ul>
@@ -41,16 +41,18 @@
             </li>
 
             <!-- Users & Company Management -->
-            {% set users_endpoints = ['manage_roles', 'edit_role', 'create_role'] %}
-            <li class="sidebar-item {% if request.endpoint in users_endpoints %}active{% endif %}">
-                <a class="sidebar-link {{ '' if request.endpoint in users_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#usersCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in users_endpoints else 'false' }}" aria-controls="usersCollapse">
+            {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'manage_roles', 'edit_role', 'create_role'] %}
+            <li class="sidebar-item {% if request.endpoint in users_teams_endpoints %}active{% endif %}">
+                <a class="sidebar-link {{ '' if request.endpoint in users_teams_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#usersCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in users_teams_endpoints else 'false' }}" aria-controls="usersCollapse">
                     <i class="bi bi-people-fill"></i>
                     <span>Users / Teams</span>
                     <i class="bi bi-chevron-down ms-auto"></i>
                 </a>
-                <div class="collapse {{ 'show' if request.endpoint in users_endpoints }}" id="usersCollapse">
+                <div class="collapse {{ 'show' if request.endpoint in users_teams_endpoints }}" id="usersCollapse">
                     <ul class="sidebar-submenu">
-                        <li class="sidebar-submenu-item"><a href="#" class="sidebar-link">Users</a></li>
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_users', 'add_user', 'edit_user'] %}active{% endif %}">
+                            <a href="{{ url_for('manage_users') }}" class="sidebar-link">Users</a>
+                        </li>
                         <li class="sidebar-submenu-item"><a href="#" class="sidebar-link">Teams</a></li>
                         <li class="sidebar-submenu-item {% if request.endpoint in ['manage_roles', 'edit_role', 'create_role'] %}active{% endif %}">
                             <a href="{{ url_for('manage_roles') }}" class="sidebar-link">Roles</a>
@@ -58,9 +60,11 @@
                     </ul>
                 </div>
             </li>
+            
+            <!-- Other Main Links -->
             {% set department_endpoints = ['manage_departments'] %}
             <li class="sidebar-item {% if request.endpoint in department_endpoints %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_departments') }}"><i class="bi bi-building"></i><span>Departments</span></a></li>
-            {% set vendor_endpoints = ['manage_vendors', 'add_vendor'] %}
+            {% set vendor_endpoints = ['manage_vendors', 'add_vendor', 'edit_vendor', 'view_vendor'] %}
             <li class="sidebar-item {% if request.endpoint in vendor_endpoints %}active{% endif %}">
                 <a class="sidebar-link" href="{{ url_for('manage_vendors') }}"><i class="bi bi-person-rolodex"></i><span>Vendors</span></a>
             </li>
@@ -89,7 +93,8 @@
 
     <!-- This footer will be fixed at the bottom -->
     <div class="sidebar-footer">
-        <a href="#" class="sidebar-link profile-link">
+        {% set profile_endpoints = ['view_profile', 'edit_profile', 'change_password'] %}
+        <a href="{{ url_for('view_profile') }}" class="sidebar-link profile-link {% if request.endpoint in profile_endpoints %}active{% endif %}">
             <i class="bi bi-person-circle"></i>
             <span>Profile</span>
         </a>

@@ -1,7 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from flask_bcrypt import Bcrypt
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.dialects.postgresql import JSONB
 
 db = SQLAlchemy()
@@ -25,8 +25,8 @@ class Company(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), unique=True, nullable=False)
     user_limit = db.Column(db.Integer, nullable=False, default=1)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     users = db.relationship('User', backref='company', lazy=True)
@@ -40,6 +40,7 @@ class Role(db.Model):
     name = db.Column(db.String(80), nullable=False)
     description = db.Column(db.String(255))
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    level = db.Column(db.Integer, nullable=False, default=99)
 
     # The many-to-many relationship to Permissions
     permissions = db.relationship('Permission', secondary=roles_permissions,
@@ -56,10 +57,15 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     first_name = db.Column(db.String(50), nullable=False)
     last_name = db.Column(db.String(50), nullable=False)
+    phone = db.Column(db.String(20), nullable=True)
     role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), nullable=True)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    department = db.relationship('Department', backref=db.backref('users', lazy=True))
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login = db.Column(db.DateTime, nullable=True)
+    password_reset_required = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def set_password(self, password):
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
@@ -85,7 +91,7 @@ class Location(db.Model):
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Add a relationship back to the Company
     company = db.relationship('Company', backref=db.backref('locations', lazy=True))
@@ -100,7 +106,7 @@ class Category(db.Model):
     category_type = db.Column(db.String(50), nullable=False)  # "Equipment" or "Inventory"
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     color = db.Column(db.String(7), nullable=False, default='#3f8efc') # Stores hex color
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Add a relationship back to the Company
     company = db.relationship('Company', backref=db.backref('categories', lazy=True))
@@ -113,7 +119,7 @@ class Department(db.Model):
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.String(255))
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Add a relationship back to the Company
     company = db.relationship('Company', backref=db.backref('departments', lazy=True))
@@ -149,7 +155,7 @@ class Equipment(db.Model):
     documents = db.Column(JSONB) # Stores a list of document filenames
 
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     company = db.relationship('Company', backref=db.backref('equipment', lazy=True))
@@ -220,7 +226,7 @@ class InventoryItem(db.Model):
     audio_files = db.Column(JSONB)
     documents = db.Column(JSONB)
     
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     company = db.relationship('Company', backref=db.backref('inventory_items', lazy=True))
@@ -248,7 +254,7 @@ class Vendor(db.Model):
     audio_files = db.Column(JSONB)
     documents = db.Column(JSONB)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     company = db.relationship('Company', backref=db.backref('vendors', lazy=True))

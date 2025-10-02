@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">User Management</h1>
+            <p class="text-muted mb-0">Manage all user accounts for your company.</p>
+        </div>
+        <div>
+            <a href="#" class="btn btn-secondary"><i class="bi bi-envelope-plus-fill me-1"></i> Invite Users</a>
+            <a href="{{ url_for('add_user') }}" class="btn btn-primary ms-1"><i class="bi bi-plus-circle me-1"></i> Add User</a>
+        </div>
+    </div>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          {% if category == 'password' %}
+            <!-- Special display for the initial password -->
+            <div class="alert alert-info d-flex justify-content-between align-items-center" role="alert">
+                <div>
+                    <strong>Initial Password:</strong>
+                    <code id="initialPassword" class="ms-2">{{ message }}</code>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="copyPasswordBtn" title="Copy to clipboard">
+                    <i class="bi bi-clipboard"></i> Copy
+                </button>
+            </div>
+          {% else %}
+            <!-- Standard display for all other messages -->
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+              {{ message }}
+              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- Search Bar -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('manage_users') }}" method="GET" class="d-flex">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" name="q" placeholder="Search by name, username, or email..." value="{{ search_query or '' }}">
+                    <button class="btn btn-outline-secondary" type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('manage_users') }}" class="btn btn-outline-danger" title="Clear Search">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Department</th>
+                            <th>Status</th>
+                            <th>Last Login</th>
+                            <th>Created</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users_list %}
+                        <tr>
+                            <td>
+                                <div>
+                                    <!-- The user's name will link to THEIR profile view, not the logged-in user's -->
+                                    <a href="{{ url_for('view_user_profile', user_id=user.id) }}" class="text-decoration-none">{{ user.first_name }} {{ user.last_name }}</a>
+                                </div>
+                                <small class="text-muted">{{ user.username }}</small>
+                            </td>
+                            <td>{{ user.role.name if user.role else 'N/A' }}</td>
+                            <td>{{ user.department.name if user.department else 'N/A' }}</td>
+                            <td>
+                                {% if user.is_active %}<span class="badge bg-success">Active</span>
+                                {% else %}<span class="badge bg-secondary">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Never' }}</td>
+                            <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td class="text-end">
+                                <!-- Define if the current user has power over the user in this row -->
+                                {% set can_manage_user = current_user.role.is_admin or (current_user.role.level < user.role.level) %}
+
+                                {% if can_manage_user %}
+                                    <a href="{{ url_for('view_user_profile', user_id=user.id) }}" class="btn btn-sm btn-outline-info" title="View">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('edit_user', user_id=user.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
+                                        <i class="bi bi-pencil-square"></i>
+                                    </a>
+                                    <!-- Initial Password functionality would go here -->
+                                    
+                                    <!-- A user cannot delete themselves from this list -->
+                                    {% if user.id != current_user.id %}
+                                    <form action="{{ url_for('delete_user', user_id=user.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure you want to delete the user {{ user.username }}?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                {% else %}
+                                    <!-- If no permission, show a disabled button or just the view button -->
+                                     <a href="{{ url_for('view_user_profile', user_id=user.id) }}" class="btn btn-sm btn-outline-info" title="View">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    <span class="text-muted small">No Actions</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <!-- ... no results row ... -->
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const copyBtn = document.getElementById('copyPasswordBtn');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', function() {
+            const passwordText = document.getElementById('initialPassword').innerText;
+            navigator.clipboard.writeText(passwordText).then(() => {
+                // Success feedback: change button text and icon
+                const originalIcon = this.innerHTML;
+                this.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
+                setTimeout(() => {
+                    this.innerHTML = originalIcon;
+                }, 2000); // Revert back after 2 seconds
+            }).catch(err => {
+                console.error('Failed to copy password: ', err);
+                alert('Failed to copy password.');
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

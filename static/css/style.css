@@ -504,6 +504,50 @@ Dark Mode Component Overrides
         border-top-color: var(--border-dark);
     }
 
+    /* --- Alerts / Flash Messages --- */
+    .alert-success {
+        --bs-alert-color: #a3cfbb;
+        --bs-alert-bg: #19875426; /* Green with low opacity */
+        --bs-alert-border-color: #19875480; /* Green with higher opacity */
+    }
+    .alert-info {
+        --bs-alert-color: #9eeaf9;
+        --bs-alert-bg: #0dcaf026;
+        --bs-alert-border-color: #0dcaf080;
+    }
+    .alert-warning {
+        --bs-alert-color: #ffc107;
+        --bs-alert-bg: #ffc10726;
+        --bs-alert-border-color: #ffc10780;
+    }
+    .alert-danger {
+        --bs-alert-color: #f1aeb5;
+        --bs-alert-bg: #dc354526;
+        --bs-alert-border-color: #dc354580;
+    }
+    /* Special override for the 'password' flash message */
+    .alert-info strong {
+        color: #9eeaf9;
+    }
+
+    /* --- Nav Tabs (for Add User page) --- */
+    .nav-tabs {
+        --bs-nav-tabs-border-color: var(--border-dark);
+    }
+    .nav-tabs .nav-link {
+        color: var(--text-secondary-dark);
+        border-color: transparent; /* Make inactive tabs have no border */
+    }
+    .nav-tabs .nav-link:hover, .nav-tabs .nav-link:focus {
+        border-color: var(--border-dark);
+        isolation: isolate; /* Fixes a hover border issue */
+    }
+    .nav-tabs .nav-link.active {
+        color: var(--text-primary-dark);
+        background-color: var(--content-bg-dark);
+        border-color: var(--border-dark) var(--border-dark) var(--content-bg-dark); /* Top, sides, bottom */
+    }
+
     /* --- List Groups (for Quick Actions panel) --- */
     .list-group-item {
         background-color: var(--content-bg-dark);

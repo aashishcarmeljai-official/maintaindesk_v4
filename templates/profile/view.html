@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-0">My Profile</h1>
+            <p class="text-muted mb-0">{{ user.first_name }} {{ user.last_name }}</p>
+        </div>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <div class="row">
+        <!-- Main Content Column -->
+        <div class="col-lg-8">
+            <!-- Profile Information Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Profile Information</h5></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><strong>Username:</strong> {{ user.username }}</div>
+                        <div class="col-md-6 mb-3"><strong>Email:</strong> {{ user.email }}</div>
+                        <div class="col-md-6 mb-3"><strong>Full Name:</strong> {{ user.first_name }} {{ user.last_name }}</div>
+                        <div class="col-md-6 mb-3"><strong>Role:</strong> {{ user.role.name if user.role else 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Department:</strong> {{ user.department.name if user.department else 'N/A' }}</div>                 
+                        <div class="col-md-6 mb-3"><strong>Phone:</strong> {{ user.phone or 'N/A' }}</div>
+                        <div class="col-md-6 mb-3">
+                            <strong>Account Status:</strong>
+                            {% if user.is_active %}
+                                <span class="badge bg-success">Active</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6 mb-3"><strong>Member Since:</strong> {{ user.created_at.strftime('%B %d, %Y') }}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recent Activity Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Recent Activity</h5></div>
+                <div class="card-body">
+                    <p class="text-muted">A log of recent actions will be displayed here.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar Column -->
+        <div class="col-lg-4">
+            <!-- Account Actions Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Account Actions</h5></div>
+                <div class="list-group list-group-flush">   
+                    <a href="{{ url_for('edit_profile') }}" class="list-group-item list-group-item-action"><i class="bi bi-person-fill-gear me-2"></i>Edit Profile</a>
+                    {% if current_user.id == user.id %}
+                        <a href="{{ url_for('change_password') }}" class="list-group-item list-group-item-action"><i class="bi bi-key-fill me-2"></i>Change Password</a>
+                    {% endif %}
+                    <!-- Show Delete Account button ONLY if the current user is an Admin -->
+                    {% if current_user.role and current_user.role.is_admin %}
+                        <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                            <i class="bi bi-trash me-2"></i>Delete Account
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Account Statistics Card -->
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Account Statistics</h5></div>
+                <div class="card-body">
+                     <p class="text-muted">User-specific statistics will be displayed here.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Account Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deleteModalLabel">Confirm Account Deletion</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>This is a permanent action. To confirm, please type <strong>DELETE</strong> in the box below.</p>
+        
+        <div class="mb-3">
+            <label for="deleteConfirmInput" class="form-label">Type to confirm:</label>
+            <input type="text" class="form-control" id="deleteConfirmInput" autocomplete="off">
+        </div>
+
+        <div class="alert alert-warning" role="alert">
+          <small>Deleting the account for <strong>{{ user.username }}</strong> cannot be undone.</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form id="deleteUserForm" action="{{ url_for('delete_user', user_id=user.id) }}" method="POST" data-confirm-text="DELETE">
+            <button type="submit" id="confirmDeleteBtn" class="btn btn-danger" disabled>Yes, Delete This Account</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const deleteModalEl = document.getElementById('deleteModal');
+    if (deleteModalEl) {
+        const confirmInput = deleteModalEl.querySelector('#deleteConfirmInput');
+        const confirmBtn = deleteModalEl.querySelector('#confirmDeleteBtn');
+        const form = deleteModalEl.querySelector('#deleteUserForm');
+        const requiredText = form.dataset.confirmText;
+
+        // Function to check if the input matches
+        const validateInput = () => {
+            if (confirmInput.value === requiredText) {
+                confirmBtn.disabled = false;
+            } else {
+                confirmBtn.disabled = true;
+            }
+        };
+
+        // Event listener for when the user types
+        confirmInput.addEventListener('keyup', validateInput);
+        
+        // Also listen for paste events
+        confirmInput.addEventListener('paste', () => {
+            // Use a short timeout to allow the pasted text to appear in the input
+            setTimeout(validateInput, 50);
+        });
+
+        // Reset the form when the modal is opened
+        deleteModalEl.addEventListener('show.bs.modal', () => {
+            confirmInput.value = '';
+            confirmBtn.disabled = true;
+        });
+    }
+});
+</script>
+{% endblock %}
