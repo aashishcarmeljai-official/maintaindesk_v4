@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">{% if category %}Edit Category{% else %}Create New Category{% endif %}</h1>
+
+    <div class="card">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('add_category') if not category else url_for('edit_category', category_id=category.id) }}">
+                <div class="row">
+                    <!-- Category Name -->
+                    <div class="col-md-6 mb-3">
+                        <label for="name" class="form-label">Category Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name" value="{{ category.name or '' }}" required>
+                    </div>
+
+                    <!-- Category Type -->
+                    <div class="col-md-6 mb-3">
+                        <label for="category_type" class="form-label">Category Type <span class="text-danger">*</span></label>
+                        <select class="form-select" id="category_type" name="category_type" required>
+                            <option value="" disabled {% if not category %}selected{% endif %}>-- Select a Type --</option>
+                            <option value="Equipment" {% if category and category.category_type == 'Equipment' %}selected{% endif %}>Equipment</option>
+                            <option value="Inventory" {% if category and category.category_type == 'Inventory' %}selected{% endif %}>Inventory</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="mb-3">
+                    <label for="description" class="form-label">Description</label>
+                    <textarea class="form-control" id="description" name="description" rows="3">{{ category.description or '' }}</textarea>
+                </div>
+                
+                <div class="row align-items-center">
+                    <!-- Color Picker -->
+                    <div class="col-md-6 mb-3">
+                        <label for="color" class="form-label">Color</label>
+                        <input type="color" class="form-control form-control-color" id="color" name="color" 
+                               value="{{ category.color or '#3f8efc' }}" title="Choose your color">
+                    </div>
+
+                    <!-- Active Toggle -->
+                    <div class="col-md-6 mb-3">
+                         <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" 
+                                   {% if category is none or category.is_active %}checked{% endif %}>
+                            <label class="form-check-label" for="is_active">Active</label>
+                            <small class="form-text text-muted d-block">Inactive categories won't appear in selection dropdowns.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <hr>
+                <a href="{{ url_for('manage_categories') }}" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">{% if category %}Save Changes{% else %}Create Category{% endif %}</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const typeSelect = document.getElementById('category_type');
+        const colorInput = document.getElementById('color');
+
+        // Store the initial color to see if it's a default or user-saved value
+        const initialColor = colorInput.value;
+        const defaultEquipmentColor = '#3f8efc'; // Blue
+        const defaultInventoryColor = '#198754'; // Green
+
+        // A flag to check if the user has manually changed the color
+        let colorManuallyChanged = false;
+        colorInput.addEventListener('input', function() {
+            colorManuallyChanged = true;
+        });
+
+        typeSelect.addEventListener('change', function() {
+            // Only change the color if the user hasn't picked one themselves
+            // or if the current color is one of the defaults.
+            if (!colorManuallyChanged || colorInput.value === defaultEquipmentColor || colorInput.value === defaultInventoryColor) {
+                if (this.value === 'Equipment') {
+                    colorInput.value = defaultEquipmentColor;
+                } else if (this.value === 'Inventory') {
+                    colorInput.value = defaultInventoryColor;
+                }
+                colorManuallyChanged = false; // Reset if we're setting a default
+            }
+        });
+    });
+</script>
+{% endblock %}

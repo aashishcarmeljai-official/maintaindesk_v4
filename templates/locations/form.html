@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">{% if location %}Edit Location{% else %}Create New Location{% endif %}</h1>
+
+    <div class="card">
+        <div class="card-body">
+            <form method="POST">
+                <!-- Basic Info -->
+                <div class="row">
+                    <div class="col-md-6 mb-3"><label for="name" class="form-label">Location Name <span class="text-danger">*</span></label><input type="text" class="form-control" id="name" name="name" value="{{ location.name or '' }}" required></div>
+                    <div class="col-md-6 mb-3"><label for="address" class="form-label">Address</label><input type="text" class="form-control" id="address" name="address" value="{{ location.address or '' }}"></div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label for="country" class="form-label">Country</label>
+                        <select class="form-select" id="country" name="country"></select>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="state" class="form-label">State/Province</label>
+                        <select class="form-select" id="state" name="state" disabled></select>
+                    </div>
+                    <div class="col-md-2 mb-3"><label for="city" class="form-label">City</label><input type="text" class="form-control" id="city" name="city" value="{{ location.city or '' }}"></div>
+                    <div class="col-md-2 mb-3"><label for="zip_code" class="form-label">ZIP/Postal Code</label><input type="text" class="form-control" id="zip_code" name="zip_code" value="{{ location.zip_code or '' }}"></div>
+                </div>
+                <div class="mb-3"><label for="description" class="form-label">Description</label><textarea class="form-control" id="description" name="description" rows="3">{{ location.description or '' }}</textarea></div>
+
+                <!-- Contact Info -->
+                <h5 class="mt-4">Contact Information</h5><hr class="mt-1 mb-3">
+                <div class="row">
+                    <div class="col-md-4 mb-3"><label for="contact_person" class="form-label">Contact Person</label><input type="text" class="form-control" id="contact_person" name="contact_person" value="{{ location.contact_person or '' }}"></div>
+                    <div class="col-md-4 mb-3"><label for="contact_phone" class="form-label">Contact Phone</label><input type="tel" class="form-control" id="contact_phone" name="contact_phone" value="{{ location.contact_phone or '' }}"></div>
+                    <div class="col-md-4 mb-3"><label for="contact_email" class="form-label">Contact Email</label><input type="email" class="form-control" id="contact_email" name="contact_email" value="{{ location.contact_email or '' }}"></div>
+                </div>
+
+                <!-- Map Coordinates -->
+                <h5 class="mt-4">Map Coordinates (Optional)</h5><hr class="mt-1 mb-3">
+                
+                <!-- MAP SEARCH BOX -->
+                <div class="mb-3">
+                    <label for="map-search-box" class="form-label">Search Location</label>
+                    <input type="text" class="form-control" id="map-search-box" placeholder="Search for an address or place...">
+                </div>
+
+                <div class="row">
+                    <div class="col-md-7">
+                        <div id="map" style="height: 300px; border-radius: 0.375rem;"></div>
+                    </div>
+                    <div class="col-md-5">
+                        <label for="latitude" class="form-label">Latitude</label><input type="text" class="form-control mb-3" id="latitude" name="latitude" value="{{ location.latitude or '' }}">
+                        <label for="longitude" class="form-label">Longitude</label><input type="text" class="form-control" id="longitude" name="longitude" value="{{ location.longitude or '' }}">
+                    </div>
+                </div>
+
+                <!-- Status (only on edit) -->
+                {% if location %}
+                <div class="form-check form-switch mt-4">
+                    <input class="form-check-input" type="checkbox" id="is_active" name="is_active" {% if location.is_active %}checked{% endif %}>
+                    <label class="form-check-label" for="is_active">Active</label>
+                </div>
+                {% endif %}
+
+                <hr>
+                <a href="{{ url_for('manage_locations') }}" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">{% if location %}Save Changes{% else %}Create Location{% endif %}</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // --- COUNTRY/STATE SCRIPT (using internal API) ---
+    document.addEventListener('DOMContentLoaded', function() {
+        const countrySelect = document.getElementById('country');
+        const stateSelect = document.getElementById('state');
+        const savedCountryName = "{{ location.country or '' }}";
+        const savedStateName = "{{ location.state or '' }}";
+
+        async function populateStates(countryCode) {
+            stateSelect.innerHTML = '<option value="">Loading...</option>';
+            stateSelect.disabled = true;
+            if (!countryCode) {
+                stateSelect.innerHTML = '<option value="">-- Select Country First --</option>';
+                return;
+            }
+            try {
+                const response = await fetch(`/api/locations/states/${countryCode}`);
+                const states = await response.json();
+                stateSelect.innerHTML = '<option value="">-- Select State/Province --</option>';
+                if (states.length > 0) {
+                    states.forEach(state => {
+                        const option = new Option(state.name, state.name, state.name === savedStateName, state.name === savedStateName);
+                        stateSelect.add(option);
+                    });
+                    stateSelect.disabled = false;
+                }
+            } catch (error) { console.error('Error fetching states:', error); }
+        }
+
+        async function populateCountries() {
+            try {
+                const response = await fetch('/api/locations/countries');
+                const countries = await response.json();
+                countrySelect.innerHTML = '<option value="">-- Select Country --</option>';
+                let selectedCountryCode = '';
+                countries.forEach(country => {
+                    const isSelected = country.name === savedCountryName;
+                    if (isSelected) selectedCountryCode = country.code;
+                    const option = new Option(country.name, country.name, isSelected, isSelected);
+                    countrySelect.add(option);
+                });
+                if (selectedCountryCode) {
+                    populateStates(selectedCountryCode);
+                }
+            } catch (error) { console.error('Error fetching countries:', error); }
+        }
+
+        countrySelect.addEventListener('change', async function() {
+            const selectedCountryName = this.value;
+            const response = await fetch('/api/locations/countries');
+            const countries = await response.json();
+            const selectedCountry = countries.find(c => c.name === selectedCountryName);
+            populateStates(selectedCountry ? selectedCountry.code : '');
+        });
+
+        populateCountries();
+    });
+
+    // --- GOOGLE MAPS SCRIPT ---
+    function initMap() {
+        const latInput = document.getElementById('latitude');
+        const lngInput = document.getElementById('longitude');
+        const searchInput = document.getElementById('map-search-box');
+        const initialLat = parseFloat(latInput.value) || 40.7128;
+        const initialLng = parseFloat(lngInput.value) || -74.0060;
+
+        const map = new google.maps.Map(document.getElementById('map'), {
+            center: { lat: initialLat, lng: initialLng },
+            zoom: 12,
+            gestureHandling: 'cooperative'
+        });
+
+        const marker = new google.maps.Marker({
+            position: { lat: initialLat, lng: initialLng },
+            map: map,
+            draggable: true
+        });
+
+        const autocomplete = new google.maps.places.Autocomplete(searchInput);
+        autocomplete.bindTo('bounds', map);
+        searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+
+        autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (!place.geometry || !place.geometry.location) {
+                window.alert("No details available for: '" + place.name + "'");
+                return;
+            }
+            if (place.geometry.viewport) map.fitBounds(place.geometry.viewport);
+            else { map.setCenter(place.geometry.location); map.setZoom(17); }
+            
+            marker.setPosition(place.geometry.location);
+            latInput.value = place.geometry.location.lat().toFixed(6);
+            lngInput.value = place.geometry.location.lng().toFixed(6);
+        });
+
+        map.addListener('click', (e) => {
+            marker.setPosition(e.latLng);
+            latInput.value = e.latLng.lat().toFixed(6);
+            lngInput.value = e.latLng.lng().toFixed(6);
+        });
+
+        marker.addListener('dragend', (e) => {
+            latInput.value = e.latLng.lat().toFixed(6);
+            lngInput.value = e.latLng.lng().toFixed(6);
+        });
+
+        const updateMarkerPosition = () => {
+            const lat = parseFloat(latInput.value);
+            const lng = parseFloat(lngInput.value);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                marker.setPosition({ lat, lng });
+                map.setCenter({ lat, lng });
+            }
+        };
+        latInput.addEventListener('input', updateMarkerPosition);
+        lngInput.addEventListener('input', updateMarkerPosition);
+    }
+    window.initMap = initMap; // Make it globally accessible
+</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key={{ maps_api_key }}&libraries=places&callback=initMap"></script>
+{% endblock %}

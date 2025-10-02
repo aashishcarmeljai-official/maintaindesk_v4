@@ -1,0 +1,22 @@
+<!-- Universal Capture Modal -->
+<div class="modal fade" id="captureModal" tabindex="-1" aria-labelledby="captureModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="captureModalLabel">Capture Media</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="video-container" class="bg-dark text-center" style="display: none;"><video id="live-video" width="100%" autoplay muted playsinline></video><canvas id="photo-canvas" style="display: none;"></canvas></div>
+                <div id="audio-container" class="text-center p-4" style="display: none;"><i class="bi bi-mic-fill fs-1 text-danger"></i><p id="recording-status">Recording...</p><div class="progress" style="height: 5px;"><div id="audio-progress" class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div></div></div>
+                <div id="permission-error" class="alert alert-danger mt-2" style="display: none;">Camera or microphone access was denied. Please enable it in your browser settings.</div>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <button type="button" id="start-btn" class="btn btn-success"><i class="bi bi-play-circle-fill me-1"></i> Start Recording</button>
+                <button type="button" id="stop-btn" class="btn btn-danger" style="display: none;"><i class="bi bi-stop-circle-fill me-1"></i> Stop Recording</button>
+                <button type="button" id="capture-btn" class="btn btn-primary" style="display: none;"><i class="bi bi-camera-fill me-1"></i> Take Photo</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>

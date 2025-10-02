@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">Manage Equipment</h1>
+            <p class="text-muted mb-0">Oversee all company equipment and assets.</p>
+        </div>
+        <a href="{{ url_for('add_equipment') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle me-1"></i> Add Equipment
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <!-- Search Bar -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('manage_equipment') }}" method="GET" class="d-flex">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" name="q" placeholder="Search by Name, ID, or Category..." value="{{ search_query or '' }}">
+                    <button class="btn btn-outline-secondary" type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('manage_equipment') }}" class="btn btn-outline-danger" title="Clear Search">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Equipment Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Equipment ID</th>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Location</th>
+                            <th>Department</th>
+                            <th>Criticality</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in equipment_list %}
+                        <tr>
+                            <td><code>{{ item.equipment_id }}</code></td>
+                            <td>{{ item.name }}</td>
+                            <td>{{ item.category.name if item.category else 'N/A' }}</td>
+                            <td>{{ item.location.name if item.location else 'N/A' }}</td>
+                            <td>{{ item.department.name if item.department else 'N/A' }}</td>
+                            <td>
+                                {% if item.criticality == 'High' %}<span class="badge text-bg-warning">{{ item.criticality }}</span>
+                                {% elif item.criticality == 'Critical' %}<span class="badge text-bg-danger">{{ item.criticality }}</span>
+                                {% elif item.criticality == 'Medium' %}<span class="badge text-bg-info">{{ item.criticality }}</span>
+                                {% else %}<span class="badge text-bg-secondary">{{ item.criticality or 'Low' }}</span>
+                                {% endif %}
+                            </td>
+                                
+                            <td class="text-end">   
+                                <a href="{{ url_for('view_equipment', equip_id=item.id) }}" class="btn btn-sm btn-outline-info" title="View">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <a href="{{ url_for('edit_equipment', equip_id=item.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
+                                    <i class="bi bi-pencil-square"></i>
+                                </a>
+                                <a href="#" class="btn btn-sm btn-outline-success" title="Create Work Order">
+                                    <i class="bi bi-tools"></i>
+                                </a>
+                                <form action="{{ url_for('delete_equipment', equip_id=item.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to permanently delete this equipment?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted p-4">
+                                {% if search_query %}
+                                    No equipment found matching your search.
+                                {% else %}
+                                    No equipment has been added yet.
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

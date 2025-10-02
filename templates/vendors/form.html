@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">{% if vendor %}Edit Vendor{% else %}Create New Vendor{% endif %}</h1>
+
+    <form id="vendorForm" method="POST" action="{{ url_for('add_vendor') if not vendor else url_for('edit_vendor', vendor_id=vendor.id) }}" enctype="multipart/form-data">
+        <!-- Basic Information -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Vendor Information</h5></div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="name" class="form-label">Vendor Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name" value="{{ vendor.name or '' }}" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="location_id" class="form-label">Location</label>
+                        <div class="input-group">
+                            <select id="location_id" name="location_id">
+                                <option value="">Select a location...</option>
+                                {% for loc in form_data.locations %}<option value="{{ loc.id }}" {% if vendor and vendor.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>{% endfor %}
+                            </select>
+                            <a href="{{ url_for('add_location') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Location"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-api-url="{{ url_for('api_get_locations') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3"><label for="description" class="form-label">Description</label><textarea class="form-control" id="description" name="description" rows="3">{{ vendor.description or '' }}</textarea></div>
+            </div>
+        </div>
+
+        <!-- Contacts -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Contacts</h5></div>        
+            <div class="card-body" id="contacts-container">
+                <!-- RENDER EXISTING CONTACTS (only on edit) -->
+                {% if vendor and vendor.contacts %}
+                    {% for contact in vendor.contacts %}
+                    <div class="row align-items-end contact-row mb-2">
+                        <input type="hidden" name="contact_id[]" value="{{ contact.id }}">
+                        <div class="col-md-3"><label class="form-label">Name</label><input type="text" class="form-control" name="contact_name[]" value="{{ contact.name or '' }}"></div>
+                        <div class="col-md-3"><label class="form-label">Email</label><input type="email" class="form-control" name="contact_email[]" value="{{ contact.email or '' }}"></div>
+                        <div class="col-md-2"><label class="form-label">Phone</label><input type="tel" class="form-control" name="contact_phone[]" value="{{ contact.phone or '' }}"></div>
+                        <div class="col-md-3"><label class="form-label">Position</label><input type="text" class="form-control" name="contact_position[]" value="{{ contact.position or '' }}"></div>
+                        <div class="col-md-1"><button type="button" class="btn btn-danger remove-contact-btn w-100"><i class="bi bi-trash"></i></button></div>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+
+                <!-- Contact Row Template (hidden) -->
+                <div class="row align-items-end contact-row mb-2" id="contact-template" style="display: none;">
+                    <input type="hidden" name="contact_id[]" value=""> <!-- Add hidden ID for new rows -->
+                    <div class="col-md-3"><label class="form-label">Name</label><input type="text" class="form-control" name="contact_name[]" disabled></div>
+                    <div class="col-md-3"><label class="form-label">Email</label><input type="email" class="form-control" name="contact_email[]" disabled></div>
+                    <div class="col-md-2"><label class="form-label">Phone</label><input type="tel" class="form-control" name="contact_phone[]" disabled></div>
+                    <div class="col-md-3"><label class="form-label">Position</label><input type="text" class="form-control" name="contact_position[]" disabled></div>
+                    <div class="col-md-1"><button type="button" class="btn btn-danger remove-contact-btn w-100"><i class="bi bi-trash"></i></button></div>
+                </div>
+            </div>
+            <div class="card-footer text-end">
+                <button type="button" id="add-contact-btn" class="btn btn-secondary">
+                    <i class="bi bi-plus-circle me-1"></i> Add Contact
+                </button>
+            </div>
+        </div>
+
+        <!-- Associations -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Associations</h5></div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <label for="equipment-search" class="form-label fw-bold">Associated Equipment (as Manufacturer)</label>
+                        <input type="text" id="equipment-search" class="form-control mb-2" placeholder="Search equipment...">
+                        <div class="form-control association-list" id="equipment-list">
+                            {% for eq in form_data.all_equipment %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="equipment_ids" value="{{ eq.id }}" id="eq-{{ eq.id }}"
+                                       {% if eq.id in form_data.associated_equipment_ids %}checked{% endif %}>
+                                <label class="form-check-label" for="eq-{{ eq.id }}">
+                                    {{ eq.name }} <small class="text-muted">({{eq.equipment_id}})</small>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="inventory-search" class="form-label fw-bold">Associated Inventory</label>
+                        <input type="text" id="inventory-search" class="form-control mb-2" placeholder="Search inventory...">
+                        <div class="association-list-table">
+                            <table class="table table-sm table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Item</th>
+                                        <th class="text-center" style="width: 70px;"><small class="text-muted">Mfr</small></th>
+                                        <th class="text-center" style="width: 70px;"><small class="text-muted">Splr</small></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inventory-list-tbody">
+                                {% for item in form_data.all_inventory %}
+                                    <tr>
+                                        <td><label class="d-block" for="inv-mfr-{{ item.id }}">{{ item.name }} <small class="text-muted">({{item.part_number}})</small></label></td>
+                                        <td class="text-center">
+                                            <input class="form-check-input" type="checkbox" name="mfr_inventory_ids" value="{{ item.id }}" id="inv-mfr-{{ item.id }}"
+                                                   {% if item.id in form_data.manufactured_inventory_ids %}checked{% endif %}>
+                                        </td>
+                                        <td class="text-center">
+                                            <input class="form-check-input" type="checkbox" name="splr_inventory_ids" value="{{ item.id }}" id="inv-splr-{{ item.id }}"
+                                                   {% if item.id in form_data.supplied_inventory_ids %}checked{% endif %}>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Media Uploads Card -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Vendor Files</h5></div>
+            <div class="card-body">
+                <p class="text-muted small">Upload or capture images, videos, audio, and documents related to this vendor.</p>
+                <div class="mb-3">
+                    <label for="images" class="form-label">Images</label>
+                    <div class="input-group">
+                        <input class="form-control" type="file" id="images" name="images" multiple accept="image/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="image"><i class="bi bi-camera-fill me-1"></i> Capture</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="images-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="videos" class="form-label">Videos</label>
+                    <div class="input-group">
+                        <input class="form-control" type="file" id="videos" name="videos" multiple accept="video/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="video"><i class="bi bi-camera-reels-fill me-1"></i> Record</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="videos-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="audio_files" class="form-label">Audio Files</label>
+                     <div class="input-group">
+                        <input class="form-control" type="file" id="audio_files" name="audio_files" multiple accept="audio/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="audio"><i class="bi bi-mic-fill me-1"></i> Record</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="audio_files-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="documents" class="form-label">Documents</label>
+                    <input class="form-control" type="file" id="documents" name="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
+                    <div class="row gx-2 gy-2 mt-2" id="documents-preview"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Display Existing Media (only on edit) -->
+        {% if vendor %}
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Existing Media</h5></div>
+            <div class="card-body">
+                {% set media_types = [('images', 'Images', vendor.images), ('videos', 'Videos', vendor.videos), ('audio', 'Audio Files', vendor.audio_files), ('documents', 'Documents', vendor.documents)] %}
+                {% set has_media = false %}
+                {% for folder, title, files in media_types %}{% if files %}{% set has_media = true %}{% endif %}{% endfor %}
+
+                {% if has_media %}
+                    <div class="row gx-2 gy-2">
+                    {% for folder, title, files in media_types %}
+                        {% if files %}
+                            {% for filename in files %}
+                            <div class="col-auto">
+                                <div class="card h-100" style="width: 150px;">
+                                    <a href="{{ url_for('static', filename='uploads/vendors/' + folder + '/' + filename) }}" target="_blank" class="text-center p-3">
+                                        {% if folder == 'images' %}<img src="{{ url_for('static', filename='uploads/vendors/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Preview">
+                                        {% elif folder == 'videos' %}<i class="bi bi-film fs-1"></i>
+                                        {% elif folder == 'audio' %}<i class="bi bi-music-note-beamed fs-1"></i>
+                                        {% else %}<i class="bi bi-file-earmark-text fs-1"></i>
+                                        {% endif %}
+                                    </a>
+                                    <div class="card-body p-2 text-center">
+                                        <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p>
+                                    </div>
+                                    <div class="card-footer p-1">
+                                        <!-- Note: This requires a `delete_vendor_media` route to be created -->
+                                        <form id="delete-form-{{ filename | replace('.', '_') }}" action="#" method="POST">
+                                            <input type="hidden" name="filename" value="{{ filename }}">
+                                            <input type="hidden" name="file_type" value="{{ 'audio_files' if folder == 'audio' else folder }}">
+                                            <button type="button" class="btn btn-sm btn-danger w-100" onclick="confirmDelete('{{ filename | replace('.', '_') }}')">
+                                                <i class="bi bi-trash"></i> Delete
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted">No media has been uploaded for this vendor yet.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="text-end">
+            <a href="{{ url_for('manage_vendors') }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary" form="vendorForm">Save Vendor</button>
+        </div>
+    </form>
+</div>
+
+<!-- Universal Capture Modal -->
+{% include 'partials/_capture_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+<script src="{{ url_for('static', filename='js/mediaCapture.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // --- Initialize TomSelect for dropdowns ---
+    const tomSelects = {};
+    tomSelects['location_id'] = new TomSelect('#location_id', { create: false, placeholder: 'Select...' });
+    
+    // --- Refresh Logic for Location ---
+    document.querySelector('.refresh-btn').addEventListener('click', async function() {
+        const apiUrl = this.dataset.apiUrl;
+        const selectInstance = tomSelects['location_id'];
+        if (!selectInstance) return;
+        const icon = this.querySelector('i'); icon.classList.add('icon-spin'); this.disabled = true;
+        try {
+            const response = await fetch(apiUrl); const data = await response.json(); const selectedValue = selectInstance.getValue();
+            selectInstance.clear(); selectInstance.clearOptions();
+            selectInstance.addOptions(data.map(item => ({ value: item.id, text: item.name })));
+            if (selectedValue) { selectInstance.setValue(selectedValue, true); }
+        } catch (error) { console.error('Error refreshing location list:', error); } 
+        finally { icon.classList.remove('icon-spin'); this.disabled = false; }
+    });
+
+    // --- Dynamic Contacts Logic ---
+    const contactsContainer = document.getElementById('contacts-container');
+    const addContactBtn = document.getElementById('add-contact-btn');
+    const contactTemplate = document.getElementById('contact-template');
+    function addContactRow() {
+        const newRow = contactTemplate.cloneNode(true);
+        newRow.style.display = 'flex';
+        newRow.removeAttribute('id');
+        newRow.querySelectorAll('input').forEach(input => input.disabled = false);
+        contactsContainer.appendChild(newRow);
+    }
+    addContactBtn.addEventListener('click', addContactRow);
+    contactsContainer.addEventListener('click', function(e) {
+        const removeButton = e.target.closest('.remove-contact-btn');
+        if (removeButton) {
+            removeButton.closest('.contact-row').remove();
+        }
+    });
+    // Add one empty contact row to start with ONLY if we're on the 'add' page
+    {% if not vendor %}
+    addContactRow();
+    {% endif %}
+    
+    // --- ASSOCIATION LIST FILTERING ---
+    function setupAssociationFilter(inputId, containerId, itemSelector) {
+        const searchInput = document.getElementById(inputId);
+        const container = document.getElementById(containerId);
+        if (!searchInput) return;
+        const allItems = container.querySelectorAll(itemSelector);
+        searchInput.addEventListener('keyup', function() {
+            const searchTerm = this.value.toLowerCase();
+            allItems.forEach(item => {
+                const itemText = item.querySelector('label').textContent.toLowerCase();
+                item.style.display = itemText.includes(searchTerm) ? '' : 'none';
+            });
+        });
+    }
+    setupAssociationFilter('equipment-search', 'equipment-list', '.form-check');
+    setupAssociationFilter('inventory-search', 'inventory-list-tbody', 'tr');
+
+    // --- CLIENT-SIDE FILE PREVIEW LOGIC ---
+    function setupFilePreview(inputId, previewContainerId) {
+        const fileInput = document.getElementById(inputId);
+        const previewContainer = document.getElementById(previewContainerId);
+        if (!fileInput) return;
+        let fileStore = new DataTransfer();
+        fileInput.addEventListener('change', function() {
+            for (let i = 0; i < this.files.length; i++) { fileStore.items.add(this.files[i]); }
+            this.files = fileStore.files;
+            renderPreviews();
+        });
+        function renderPreviews() {
+            previewContainer.innerHTML = '';
+            Array.from(fileStore.files).forEach((file, index) => {
+                const wrapper = document.createElement('div'); wrapper.className = 'col-auto';
+                const card = document.createElement('div'); card.className = 'card h-100 position-relative'; card.style.width = '120px';
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'btn btn-sm btn-danger position-absolute top-0 end-0 m-1 p-0 lh-1';
+                removeBtn.style.cssText = 'width: 1.2rem; height: 1.2rem;';
+                removeBtn.innerHTML = '&times;'; removeBtn.type = 'button'; removeBtn.title = 'Remove ' + file.name;
+                removeBtn.onclick = function() {
+                    fileStore.items.remove(index);
+                    fileInput.files = fileStore.files;
+                    renderPreviews();
+                };
+                let content = '';
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        content = `<img src="${e.target.result}" class="card-img-top" style="object-fit: cover; height: 80px;" alt="Preview">`;
+                        card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
+                        card.prepend(removeBtn);
+                    }
+                    reader.readAsDataURL(file);
+                } else {
+                    let icon = 'bi-file-earmark-text';
+                    if (file.type.startsWith('video/')) icon = 'bi-film';
+                    if (file.type.startsWith('audio/')) icon = 'bi-music-note-beamed';
+                    content = `<div class="text-center p-3"><i class="bi ${icon} fs-2"></i></div>`;
+                    card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
+                    card.prepend(removeBtn);
+                }
+                wrapper.appendChild(card);
+                previewContainer.appendChild(wrapper);
+            });
+        }
+    }
+    setupFilePreview('images', 'images-preview');
+    setupFilePreview('videos', 'videos-preview');
+    setupFilePreview('audio_files', 'audio_files-preview');
+    setupFilePreview('documents', 'documents-preview');
+});
+
+// --- MEDIA DELETION CONFIRMATION (for existing media on edit page) ---
+function confirmDelete(filename) {
+    if (confirm('Are you sure you want to permanently delete this file?')) {
+        document.getElementById('delete-form-' + filename.replace(/\./g, '_')).submit();
+    }
+}
+window.confirmDelete = confirmDelete;
+</script>
+{% endblock %}

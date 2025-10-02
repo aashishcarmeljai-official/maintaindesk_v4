@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">{{ equipment.name }}</h1>
+            <p class="text-muted mb-0">Equipment ID: <code>{{ equipment.equipment_id }}</code></p>
+        </div>
+        <a href="{{ url_for('manage_equipment') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Back to All Equipment
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <div class="row">
+        <!-- Main Content Column -->
+        <div class="col-lg-8">
+            <!-- Equipment Information Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Equipment Information</h5></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><strong>Category:</strong> {{ equipment.category.name if equipment.category else 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Location:</strong> {{ equipment.location.name if equipment.location else 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Department:</strong> {{ equipment.department.name if equipment.department else 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Criticality:</strong> {{ equipment.criticality or 'N/A' }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Technical Details Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Technical Details</h5></div>
+                <div class="card-body">
+                    <div class="row">                      
+                        <div class="col-md-6 mb-3"><strong>Manufacturer:</strong> {{ equipment.manufacturer.name if equipment.manufacturer else 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Model:</strong> {{ equipment.model or 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Serial Number:</strong> {{ equipment.serial_number or 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Purchase Date:</strong> {{ equipment.purchase_date.strftime('%Y-%m-%d') if equipment.purchase_date else 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Warranty Expiry:</strong> {{ equipment.warranty_expiry_date.strftime('%Y-%m-%d') if equipment.warranty_expiry_date else 'N/A' }}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Description & Specifications Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Description & Specifications</h5></div>
+                <div class="card-body">
+                    <h6>Description</h6>
+                    <p>{{ equipment.description or 'No description provided.' }}</p>
+                    <hr>
+                    <h6>Technical Specifications</h6>
+                    <p>{{ equipment.specifications or 'No specifications provided.' }}</p>
+                </div>
+            </div>
+            
+                
+            <!-- Media Attachments Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Media Attachments</h5></div>
+                <div class="card-body">
+                    {% set media_types = [
+                        ('images', 'Images', equipment.images), 
+                        ('videos', 'Videos', equipment.videos), 
+                        ('audio', 'Audio Files', equipment.audio_files), 
+                        ('documents', 'Documents', equipment.documents)
+                    ] %}
+                    {% set has_media = false %}
+
+                    {% for folder, title, files in media_types %}
+                        {% if files %}
+                            {% set has_media = true %}
+                            <h6 class="mt-3">{{ title }}</h6>
+                            <div class="row gx-2 gy-2">
+                                {% for filename in files %}
+                                <div class="col-auto">
+                                    <div class="card h-100" style="width: 150px;">
+                                        <!-- Preview Section -->
+                                        <a href="{{ url_for('static', filename='uploads/equipment/' + folder + '/' + filename) }}" target="_blank" class="text-center p-3">
+                                            {% if folder == 'images' %}
+                                                <img src="{{ url_for('static', filename='uploads/equipment/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Image preview" style="object-fit: cover; height: 80px;">
+                                            {% elif folder == 'videos' %}
+                                                <i class="bi bi-film fs-1"></i>
+                                            {% elif folder == 'audio' %}
+                                                <i class="bi bi-music-note-beamed fs-1"></i>
+                                            {% else %}
+                                                <i class="bi bi-file-earmark-text fs-1"></i>
+                                            {% endif %}
+                                        </a>
+                                        <!-- Card Body with Filename -->
+                                        <div class="card-body p-2 text-center">
+                                            <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">
+                                                <a href="{{ url_for('static', filename='uploads/equipment/' + folder + '/' + filename) }}" target="_blank" class="text-decoration-none">
+                                                    {{ filename.split('_')[-1] }}
+                                                </a>
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if not has_media %}
+                        <p class="text-muted">No media has been uploaded for this equipment.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Recent Work Orders Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Recent Work Orders</h5></div>
+                <div class="card-body">
+                    <p class="text-muted">Work order history will be displayed here.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar Column -->
+        <div class="col-lg-4">
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
+                <div class="list-group list-group-flush">
+                    <a href="{{ url_for('edit_equipment', equip_id=equipment.id) }}" class="list-group-item list-group-item-action"><i class="bi bi-pencil-square me-2"></i>Edit Equipment</a>
+                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-tools me-2"></i>Create Work Order</a>
+                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-qr-code me-2"></i>Generate QR Code</a>
+                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-card-list me-2"></i>View Work Orders</a>
+                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-box-seam me-2"></i>Check Inventory</a>
+                    <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                        <i class="bi bi-trash me-2"></i>Delete Equipment
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deleteModalLabel">Confirm Deletion</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Are you sure you want to permanently delete <strong>{{ equipment.name }}</strong>? This action cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form action="{{ url_for('delete_equipment', equip_id=equipment.id) }}" method="POST">
+            <button type="submit" class="btn btn-danger">Yes, Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

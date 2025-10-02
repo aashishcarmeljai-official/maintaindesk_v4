@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <i class="bi bi-envelope-check"></i>
+            <h1>Sign Up - Step 1 of 3</h1>
+            <p>Please enter your organization's email</p>
+        </div>
+
+        <form method="POST" action="{{ url_for('signup_step1_email') }}">
+            <div class="mb-3">
+                <label for="email" class="form-label">Email address</label>
+                <input type="email" class="form-control" id="email" name="email" required autofocus>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Continue</button>
+        </form>
+        <div class="login-footer">
+            <span>Already have an account? </span>
+            <a href="{{ url_for('login') }}">Log In</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

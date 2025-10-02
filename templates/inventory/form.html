@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">{% if item %}Edit Inventory Item{% else %}Create New Inventory Item{% endif %}</h1>
+
+    <form id="inventoryForm" method="POST" action="{{ url_for('add_inventory_item') if not item else url_for('edit_inventory_item', item_id=item.id) }}" enctype="multipart/form-data">
+        <!-- Basic Information -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Basic Information</h5></div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="name" class="form-label">Item Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name" value="{{ item.name or '' }}" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="part_number" class="form-label">Part Number</label>
+                        <input type="text" class="form-control" id="part_number" name="part_number" value="{{ item.part_number or '' }}" readonly>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="category_id" class="form-label">Category <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <select id="category_id" name="category_id" required>
+                                <option value="">Select a category...</option>
+                                {% for cat in form_data.categories %}<option value="{{ cat.id }}" {% if item and item.category_id == cat.id %}selected{% endif %}>{{ cat.name }}</option>{% endfor %}
+                            </select>
+                            <a href="{{ url_for('add_category') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Category"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="category" data-api-url="{{ url_for('api_get_categories') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="department_id" class="form-label">Department</label>
+                        <div class="input-group">
+                            <select id="department_id" name="department_id">
+                                <option value="">Select a department...</option>
+                                {% for dept in form_data.departments %}<option value="{{ dept.id }}" {% if item and item.department_id == dept.id %}selected{% endif %}>{{ dept.name }}</option>{% endfor %}
+                            </select>
+                            <a href="{{ url_for('manage_departments') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Department"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="department" data-api-url="{{ url_for('api_get_departments') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-3"><label for="description" class="form-label">Description</label><textarea class="form-control" id="description" name="description" rows="3">{{ item.description or '' }}</textarea></div>
+            </div>
+        </div>
+
+        <!-- Supplier Information -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Supplier Information</h5></div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="manufacturer_id" class="form-label">Manufacturer (Vendor)</label>
+                        <div class="input-group">
+                            <select id="manufacturer_id" name="manufacturer_id">
+                                <option value="">Select a manufacturer...</option>
+                                {% for vendor in form_data.vendors %}
+                                <option value="{{ vendor.id }}" {% if item and item.manufacturer_id == vendor.id %}selected{% endif %}>{{ vendor.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <a href="{{ url_for('add_vendor') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Vendor"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="manufacturer" data-api-url="{{ url_for('api_get_vendors') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="supplier_id" class="form-label">Supplier (Vendor)</label>
+                        <div class="input-group">
+                            <select id="supplier_id" name="supplier_id">
+                                <option value="">Select a supplier...</option>
+                                {% for vendor in form_data.vendors %}
+                                <option value="{{ vendor.id }}" {% if item and item.supplier_id == vendor.id %}selected{% endif %}>{{ vendor.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <a href="{{ url_for('add_vendor') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Vendor"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="supplier" data-api-url="{{ url_for('api_get_vendors') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="unit_cost" class="form-label">Unit Cost</label>
+                        <div class="input-group">
+                            <select id="currency_id" name="currency_id">
+                                {% for curr in form_data.currencies %}
+                                <option value="{{ curr.id }}" data-symbol="{{ curr.symbol or '' }}" {% if (item and item.currency_id == curr.id) or (not item and form_data.default_currency_id == curr.id) %}selected{% endif %}>{{ curr.code }}</option>
+                                {% endfor %}
+                            </select>
+                            <input type="number" step="0.01" class="form-control" id="unit_cost" name="unit_cost" value="{{ item.unit_cost or '' }}">
+                            <a href="{{ url_for('manage_currencies') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Currency"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="currency" data-api-url="{{ url_for('api_get_currencies') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="unit_of_measure_id" class="form-label">Unit of Measure</label>
+                        <div class="input-group">
+                            <select id="unit_of_measure_id" name="unit_of_measure_id">
+                                <option value="">Select a unit...</option>
+                                {% for unit in form_data.units %}<option value="{{ unit.id }}" {% if item and item.unit_of_measure_id == unit.id %}selected{% endif %}>{{ unit.name }} ({{unit.symbol}})</option>{% endfor %}
+                            </select>
+                             <a href="{{ url_for('manage_units') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Unit"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="unit_of_measure" data-api-url="{{ url_for('api_get_units') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Stock & Storage -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Stock & Storage</h5></div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3"><label for="current_stock" class="form-label">Current Stock</label><input type="number" class="form-control" id="current_stock" name="current_stock" value="{{ item.current_stock if item is not none else 0 }}"></div>
+                    <div class="col-md-4 mb-3"><label for="minimum_stock" class="form-label">Minimum Stock <span class="text-danger">*</span></label><input type="number" class="form-control" id="minimum_stock" name="minimum_stock" value="{{ item.minimum_stock or '' }}" required><small class="form-text text-muted">Reorder Point</small></div>
+                    <div class="col-md-4 mb-3"><label for="maximum_stock" class="form-label">Maximum Stock</label><input type="number" class="form-control" id="maximum_stock" name="maximum_stock" value="{{ item.maximum_stock or '' }}"><small class="form-text text-muted">Optional - for space planning</small></div>
+                </div>
+                <div class="mb-3">
+                    <label for="location_id" class="form-label">Storage Location</label>
+                    <div class="input-group">
+                        <select id="location_id" name="location_id">
+                            <option value="">Select a location...</option>
+                            {% for loc in form_data.locations %}<option value="{{ loc.id }}" {% if item and item.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>{% endfor %}
+                        </select>
+                        <a href="{{ url_for('add_location') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Location"><i class="bi bi-plus"></i></a>
+                        <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="location" data-api-url="{{ url_for('api_get_locations') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Media Uploads Card -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Media</h5></div>
+            <div class="card-body">
+                <p class="text-muted small">Upload or capture new files here. Existing files will be preserved.</p>
+                <div class="mb-3">
+                    <label for="images" class="form-label">Images</label>
+                    <div class="input-group">
+                        <input class="form-control" type="file" id="images" name="images" multiple accept="image/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="image"><i class="bi bi-camera-fill me-1"></i> Capture</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="images-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="videos" class="form-label">Videos</label>
+                    <div class="input-group">
+                        <input class="form-control" type="file" id="videos" name="videos" multiple accept="video/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="video"><i class="bi bi-camera-reels-fill me-1"></i> Record</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="videos-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="audio_files" class="form-label">Audio Files</label>
+                     <div class="input-group">
+                        <input class="form-control" type="file" id="audio_files" name="audio_files" multiple accept="audio/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="audio"><i class="bi bi-mic-fill me-1"></i> Record</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="audio_files-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="documents" class="form-label">Documents</label>
+                    <input class="form-control" type="file" id="documents" name="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
+                    <div class="row gx-2 gy-2 mt-2" id="documents-preview"></div>
+                </div>
+            </div>
+        </div>
+    </form>
+    
+    <!-- Display Existing Media (only on edit) -->
+    {% if item %}
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">Existing Media</h5></div>
+        <div class="card-body">
+            {% set media_types = [
+                ('images', 'Images', item.images), 
+                ('videos', 'Videos', item.videos), 
+                ('audio', 'Audio Files', item.audio_files), 
+                ('documents', 'Documents', item.documents)
+            ] %}
+            {% set has_media = false %}
+
+            {% for folder, title, files in media_types %}
+                {% if files %}
+                    {% set has_media = true %}
+                    <h6 class="mt-3">{{ title }}</h6>
+                    <div class="row gx-2 gy-2">
+                        {% for filename in files %}
+                        <div class="col-auto">
+                            <div class="card h-100" style="width: 150px;">
+                                <a href="{{ url_for('static', filename='uploads/inventory/' + folder + '/' + filename) }}" target="_blank" class="text-center p-3">
+                                    {% if folder == 'images' %}<img src="{{ url_for('static', filename='uploads/inventory/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Image preview">
+                                    {% elif folder == 'videos' %}<i class="bi bi-film fs-1"></i>
+                                    {% elif folder == 'audio' %}<i class="bi bi-music-note-beamed fs-1"></i>
+                                    {% else %}<i class="bi bi-file-earmark-text fs-1"></i>
+                                    {% endif %}
+                                </a>
+                                <div class="card-body p-2 text-center">
+                                    <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p>
+                                </div>
+                                <div class="card-footer p-1">
+                                    <form id="delete-form-{{ filename | replace('.', '_') }}" action="{{ url_for('delete_inventory_media', item_id=item.id) }}" method="POST">
+                                        <input type="hidden" name="filename" value="{{ filename }}">
+                                        <input type="hidden" name="file_type" value="{{ 'audio_files' if folder == 'audio' else folder }}">
+                                        <button type="button" class="btn btn-sm btn-danger w-100" onclick="confirmDelete('{{ filename | replace('.', '_') }}')">
+                                            <i class="bi bi-trash"></i> Delete
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+
+            {% if not has_media %}
+                <p class="text-muted">No media has been uploaded for this item yet.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="text-end">
+        <a href="{{ url_for('manage_inventory') }}" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary" form="inventoryForm">Save Item</button>
+    </div>
+</div>
+
+<!-- Universal Capture Modal -->
+{% include 'partials/_capture_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+<script src="{{ url_for('static', filename='js/mediaCapture.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // --- PART 1: PAGE-SPECIFIC LOGIC (ID Generation, Dropdowns, Refresh) ---
+
+    // ID Generation (Handles both Equipment and Inventory)
+    const nameInput = document.getElementById('name');
+    const idInput = document.getElementById('equipment_id') || document.getElementById('part_number');
+    if (idInput && !idInput.value) {
+        const prefix = (idInput.id === 'equipment_id') ? 'EQ' : 'PART';
+        nameInput.addEventListener('keyup', function() {
+            const name = this.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/\s+/g, '-');
+            idInput.value = `${prefix}-${name}-${Date.now().toString().slice(-6)}`;
+        });
+    }
+
+    // TomSelect Initialization
+    const tomSelects = {};
+    const selectIds = ['category_id', 'location_id', 'department_id', 'currency_id', 'unit_of_measure_id', 'manufacturer_id', 'supplier_id'];
+    selectIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            let config = { create: false, placeholder: 'Select...' };
+            if (id === 'currency_id') {
+                config.render = {
+                    option: (data, escape) => `<div>${escape(data.text)} ${data.symbol ? `(${escape(data.symbol)})` : ''}</div>`,
+                    item: (data, escape) => `<div>${escape(data.text)} ${data.symbol ? `(${escape(data.symbol)})` : ''}</div>`
+                };
+            }
+            tomSelects[id] = new TomSelect(el, config);
+        }
+    });
+
+    // Refresh Logic
+    document.querySelectorAll('.refresh-btn').forEach(button => {
+        button.addEventListener('click', async function() {
+            const type = this.dataset.type;
+            const apiUrl = this.dataset.apiUrl;
+            const typeToIdMap = {
+                'category': 'category_id',
+                'department': 'department_id',
+                'currency': 'currency_id',
+                'unit_of_measure': 'unit_of_measure_id',
+                'location': 'location_id',
+                'manufacturer': 'manufacturer_id',
+                'supplier': 'supplier_id'
+            };
+            const selectId = typeToIdMap[type];
+            const selectInstance = tomSelects[selectId];
+            if (!selectInstance) return;
+
+            const icon = this.querySelector('i');
+            icon.classList.add('icon-spin');
+            this.disabled = true;
+
+            try {
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+                const selectedValue = selectInstance.getValue();
+                selectInstance.clear();
+                selectInstance.clearOptions();
+                let newOptions;
+                if (type === 'unit_of_measure') {
+                    newOptions = data.map(item => ({ value: item.id, text: `${item.name} (${item.symbol || ''})` }));
+                } else if (type === 'currency') {
+                    newOptions = data.map(item => ({ value: item.id, text: item.code, symbol: item.symbol }));
+                } else {
+                    newOptions = data.map(item => ({ value: item.id, text: item.name }));
+                }
+                selectInstance.addOptions(newOptions);
+                if (selectedValue) {
+                    selectInstance.setValue(selectedValue, true);
+                }
+            } catch (error) {
+                console.error(`Error refreshing ${type} list:`, error);
+            } finally {
+                icon.classList.remove('icon-spin');
+                this.disabled = false;
+            }
+        });
+    });
+
+    // --- PART 2: GENERIC PREVIEW LOGIC ---
+    // This is identical for both forms.
+    function setupFilePreview(inputId, previewContainerId) {
+        const fileInput = document.getElementById(inputId);
+        const previewContainer = document.getElementById(previewContainerId);
+        if (!fileInput) return;
+        let fileStore = new DataTransfer();
+        fileInput.addEventListener('change', function() {
+            // Add any newly selected files to our store
+            for (let i = 0; i < this.files.length; i++) {
+                fileStore.items.add(this.files[i]);
+            }
+            // The crucial step: update the input's files with the managed list
+            this.files = fileStore.files;
+            renderPreviews();
+        });
+
+        function renderPreviews() {
+            previewContainer.innerHTML = '';
+            Array.from(fileStore.files).forEach((file, index) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'col-auto';
+                const card = document.createElement('div');
+                card.className = 'card h-100 position-relative';
+                card.style.width = '120px';
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'btn btn-sm btn-danger position-absolute top-0 end-0 m-1 p-0 lh-1';
+                removeBtn.style.cssText = 'width: 1.2rem; height: 1.2rem;';
+                removeBtn.innerHTML = '&times;';
+                removeBtn.type = 'button';
+                removeBtn.title = 'Remove ' + file.name;
+                removeBtn.onclick = function() {
+                    fileStore.items.remove(index);
+                    fileInput.files = fileStore.files; // Update the input again
+                    renderPreviews(); // Re-render the UI
+                };
+                let content = '';
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        content = `<img src="${e.target.result}" class="card-img-top" style="object-fit: cover; height: 80px;" alt="Preview">`;
+                        card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
+                        card.prepend(removeBtn);
+                    }
+                    reader.readAsDataURL(file);
+                } else {
+                    let icon = 'bi-file-earmark-text';
+                    if (file.type.startsWith('video/')) icon = 'bi-film';
+                    if (file.type.startsWith('audio/')) icon = 'bi-music-note-beamed';
+                    content = `<div class="text-center p-3"><i class="bi ${icon} fs-2"></i></div>`;
+                    card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
+                    card.prepend(removeBtn);
+                }
+                wrapper.appendChild(card);
+                previewContainer.appendChild(wrapper);
+            });
+        }
+    }
+    setupFilePreview('images', 'images-preview');
+    setupFilePreview('videos', 'videos-preview');
+    setupFilePreview('audio_files', 'audio_files-preview');
+    setupFilePreview('documents', 'documents-preview');
+});
+
+// --- MEDIA DELETION CONFIRMATION ---
+function confirmDelete(filename) {
+    if (confirm('Are you sure you want to permanently delete this file?')) {
+        document.getElementById('delete-form-' + filename.replace(/\./g, '_')).submit();
+    }
+}
+window.confirmDelete = confirmDelete;
+</script>
+{% endblock %}

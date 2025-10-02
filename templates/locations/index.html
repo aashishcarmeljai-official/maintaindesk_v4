@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">Manage Locations</h1>
+            <p class="text-muted mb-0">Oversee all company sites and facilities.</p>
+        </div>
+        <a href="{{ url_for('add_location') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle me-1"></i> Add Location
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <!-- Search Bar -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('manage_locations') }}" method="GET" class="d-flex">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" name="q" placeholder="Search by Location Name..." value="{{ search_query or '' }}">
+                    <button class="btn btn-outline-secondary" type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('manage_locations') }}" class="btn btn-outline-danger" title="Clear Search">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Locations Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Location Name</th>
+                            <th>Address</th>
+                            <th>Contact</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for location in locations %}
+                        <tr>
+                            <td>{{ location.name }}</td>
+                            <td>{{ [location.address, location.city, location.state] | select('ne', none) | join(', ') }}</td>
+                            <td>
+                                {% if location.contact_person %}
+                                    <div>{{ location.contact_person }}</div>
+                                    <small class="text-muted">{{ location.contact_phone or location.contact_email }}</small>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if location.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+                            </td>
+                            <td class="text-end">
+                                <a href="{{ url_for('edit_location', loc_id=location.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
+                                    <i class="bi bi-pencil-square"></i>
+                                </a>
+                                <form action="{{ url_for('delete_location', loc_id=location.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure you want to delete this location?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted p-4">No locations found.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

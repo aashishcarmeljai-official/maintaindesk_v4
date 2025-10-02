@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">{{ vendor.name }}</h1>
+        </div>
+        <div>
+            <a href="{{ url_for('manage_vendors') }}" class="btn btn-secondary">
+                <i class="bi bi-arrow-left me-1"></i> Back to All Vendors
+            </a>
+        </div>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <div class="row">
+        <!-- Main Content Column -->
+        <div class="col-lg-8">
+            <!-- Vendor Information Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Vendor Information</h5></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><strong>Location:</strong> {{ vendor.location.name if vendor.location else 'N/A' }}</div>
+                    </div>
+                    <h6>Description</h6>
+                    <p>{{ vendor.description or 'No description provided.' }}</p>
+                </div>
+            </div>
+
+            <!-- Contacts Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Contacts</h5></div>
+                <div class="card-body">
+                    {% if vendor.contacts %}
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead><tr><th>Name</th><th>Position</th><th>Email</th><th>Phone</th></tr></thead>
+                                <tbody>
+                                    {% for contact in vendor.contacts %}
+                                    <tr>
+                                        <td>{{ contact.name }}</td>
+                                        <td>{{ contact.position or 'N/A' }}</td>
+                                        <td>{{ contact.email or 'N/A' }}</td>
+                                        <td>{{ contact.phone or 'N/A' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No contacts have been added for this vendor.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Associations Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Associations</h5></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Associated Equipment (as Manufacturer)</h6>
+                            {% if associated_equipment %}
+                                <div class="list-group">
+                                {% for eq in associated_equipment %}
+                                    <a href="{{ url_for('view_equipment', equip_id=eq.id) }}" class="list-group-item list-group-item-action">
+                                        {{ eq.name }} <small class="text-muted">({{ eq.equipment_id }})</small>
+                                    </a>
+                                {% endfor %}
+                                </div>
+                            {% else %}
+                                <p class="text-muted">This vendor is not listed as the manufacturer for any equipment.</p>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Associated Inventory</h6>
+                            {% if associated_inventory %}
+                                <div class="list-group">
+                                {% for item in associated_inventory %}
+                                    <a href="{{ url_for('view_inventory_item', item_id=item.id) }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                        <span>
+                                            {{ item.name }} <small class="text-muted">({{ item.part_number }})</small>
+                                        </span>
+                                        <span>
+                                            {% if item.manufacturer_id == vendor.id %}
+                                                <span class="badge bg-primary">Mfr</span>
+                                            {% endif %}
+                                            {% if item.supplier_id == vendor.id %}
+                                                <span class="badge bg-success">Splr</span>
+                                            {% endif %}
+                                        </span>
+                                    </a>
+                                {% endfor %}
+                                </div>
+                            {% else %}
+                                <p class="text-muted">No inventory items associated with this vendor.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vendor Files Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Vendor Files</h5></div>
+                <div class="card-body">
+                    {% set media_types = [('images', 'Images', vendor.images), ('videos', 'Videos', vendor.videos), ('audio', 'Audio Files', vendor.audio_files), ('documents', 'Documents', vendor.documents)] %}
+                    {% set has_media = false %}
+                    {% for folder, title, files in media_types %}{% if files %}{% set has_media = true %}{% endif %}{% endfor %}
+                    {% if has_media %}
+                        <div class="row gx-2 gy-2">
+                        {% for folder, title, files in media_types %}
+                            {% if files %}
+                                {% for filename in files %}
+                                <div class="col-auto">
+                                    <a href="{{ url_for('static', filename='uploads/vendors/' + folder + '/' + filename) }}" target="_blank" class="text-decoration-none">
+                                        <div class="card h-100" style="width: 150px;">
+                                            <div class="text-center p-3">
+                                                {% if folder == 'images' %}<img src="{{ url_for('static', filename='uploads/vendors/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Image preview" style="object-fit: cover; height: 80px;">
+                                                {% elif folder == 'videos' %}<i class="bi bi-film fs-1"></i>
+                                                {% elif folder == 'audio' %}<i class="bi bi-music-note-beamed fs-1"></i>
+                                                {% else %}<i class="bi bi-file-earmark-text fs-1"></i>
+                                                {% endif %}
+                                            </div>
+                                            <div class="card-body p-2 text-center">
+                                                <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p>
+                                            </div>
+                                        </div>
+                                    </a>
+                                </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endfor %}
+                        </div>
+                    {% else %}
+                         <p class="text-muted">No files have been uploaded for this vendor.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar Column -->
+        <div class="col-lg-4">
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
+                <div class="list-group list-group-flush">
+                    <a href="{{ url_for('edit_vendor', vendor_id=vendor.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-pencil-square me-2"></i>Edit Vendor
+                    </a>
+                    <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                        <i class="bi bi-trash me-2"></i>Delete Vendor
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deleteModalLabel">Confirm Deletion</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Are you sure you want to permanently delete <strong>{{ vendor.name }}</strong>? This action cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form action="{{ url_for('delete_vendor', vendor_id=vendor.id) }}" method="POST">
+            <button type="submit" class="btn btn-danger">Yes, Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

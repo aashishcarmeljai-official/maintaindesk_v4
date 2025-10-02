@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">Currencies</h1>
+            <p class="text-muted mb-0">Manage all currencies for financial transactions.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="addCurrencyBtn">
+            <i class="bi bi-plus-circle me-1"></i> Add Currency
+        </button>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <!-- Search Bar -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('manage_currencies') }}" method="GET" class="d-flex">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" name="q" placeholder="Search by Name or Code..." value="{{ search_query or '' }}">
+                    <button class="btn btn-outline-secondary" type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('manage_currencies') }}" class="btn btn-outline-danger" title="Clear Search">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Currencies Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">    
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Code</th>
+                            <th>Symbol</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for currency in currencies %}
+                        <tr>
+                            <td>
+                                {{ currency.name }}
+                                {% if currency.is_default %}
+                                    <span class="badge bg-primary ms-1">Default</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ currency.code }}</td>
+                            <td>{{ currency.symbol or 'N/A' }}</td>
+                            <td>
+                                {% if currency.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                <!-- Form to set as default (only if it's not already the default) -->
+                                {% if not currency.is_default %}
+                                <form action="{{ url_for('set_default_currency', currency_id=currency.id) }}" method="POST" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-outline-success" title="Set as Default">
+                                        <i class="bi bi-star-fill"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                                
+                                <button class="btn btn-sm btn-outline-primary edit-btn ms-1" data-currency-id="{{ currency.id }}" title="Edit">
+                                    <i class="bi bi-pencil-square"></i>
+                                </button>
+                                <form action="{{ url_for('delete_currency', currency_id=currency.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-center text-muted p-4">No currencies found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Currency Modal -->
+<div class="modal fade" id="currencyModal" tabindex="-1" aria-labelledby="currencyModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="currencyModalLabel">Add New Currency</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="currencyForm" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Currency Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="code" class="form-label">Code (e.g., USD) <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="code" name="code" required maxlength="3">
+                    </div>
+                    <div class="mb-3">
+                        <label for="symbol" class="form-label">Symbol (e.g., $)</label>
+                        <input type="text" class="form-control" id="symbol" name="symbol" maxlength="5">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const currencyModal = new bootstrap.Modal(document.getElementById('currencyModal'));
+    const modalTitle = document.getElementById('currencyModalLabel');
+    const currencyForm = document.getElementById('currencyForm');
+
+    // Handle "Add Currency" button click
+    document.getElementById('addCurrencyBtn').addEventListener('click', function() {
+        modalTitle.textContent = 'Add New Currency';
+        currencyForm.action = "{{ url_for('add_currency') }}";
+        currencyForm.reset();
+        currencyModal.show();
+    });
+
+    // Handle "Edit" button clicks
+    document.querySelectorAll('.edit-btn').forEach(button => {
+        button.addEventListener('click', async function() {
+            const currencyId = this.dataset.currencyId;
+            modalTitle.textContent = 'Edit Currency';
+            currencyForm.action = `/currencies/edit/${currencyId}`;
+            
+            const response = await fetch(`/api/currency/${currencyId}`);
+            const data = await response.json();
+
+            currencyForm.querySelector('#name').value = data.name;
+            currencyForm.querySelector('#code').value = data.code || '';
+            currencyForm.querySelector('#symbol').value = data.symbol || '';
+
+            currencyModal.show();
+        });
+    });
+});
+</script>
+{% endblock %}

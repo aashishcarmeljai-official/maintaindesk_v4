@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">Units & Measurement</h1>
+            <p class="text-muted mb-0">Manage all units of measurement for your company.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="addUnitBtn">
+            <i class="bi bi-plus-circle me-1"></i> Add Unit
+        </button>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <!-- Search Bar -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('manage_units') }}" method="GET" class="d-flex">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" name="q" placeholder="Search by Unit Name..." value="{{ search_query or '' }}">
+                    <button class="btn btn-outline-secondary" type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('manage_units') }}" class="btn btn-outline-danger" title="Clear Search">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Units Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Symbol</th>
+                            <th>Base Unit</th>
+                            <th>Conversion Factor</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for unit, base_unit_name in units %}
+                        <tr>
+                            <td>{{ unit.name }}</td>
+                            <td>{{ unit.symbol or 'N/A' }}</td>
+                            <td>{{ base_unit_name or 'N/A' }}</td>
+                            <td>{{ unit.conversion_factor or 'N/A' }}</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary edit-btn" data-unit-id="{{ unit.id }}" title="Edit">
+                                    <i class="bi bi-pencil-square"></i>
+                                </button>
+                                <form action="{{ url_for('delete_unit', unit_id=unit.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-center text-muted p-4">No units found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Unit Modal -->
+<div class="modal fade" id="unitModal" tabindex="-1" aria-labelledby="unitModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="unitModalLabel">Add New Unit</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="unitForm" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Unit Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="symbol" class="form-label">Symbol</label>
+                        <input type="text" class="form-control" id="symbol" name="symbol">
+                    </div>
+                    <hr>
+                    <p class="text-muted small">Optional: Define this unit relative to a base unit (e.g., Name: Millimeter, Base Unit: Meter, Factor: 0.001).</p>
+                    <div class="mb-3">
+                        <label for="base_unit_id" class="form-label">Relative to (Base Unit)</label>
+                        <select class="form-select" id="base_unit_id" name="base_unit_id">
+                            <option value="">-- None (This is a base unit) --</option>
+                            {% for unit in all_units %}<option value="{{ unit.id }}">{{ unit.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="conversion_factor" class="form-label">Conversion Factor to Base</label>
+                        <input type="number" step="any" class="form-control" id="conversion_factor" name="conversion_factor">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const unitModal = new bootstrap.Modal(document.getElementById('unitModal'));
+    const modalTitle = document.getElementById('unitModalLabel');
+    const unitForm = document.getElementById('unitForm');
+
+    // Handle "Add Unit" button click
+    document.getElementById('addUnitBtn').addEventListener('click', function() {
+        modalTitle.textContent = 'Add New Unit';
+        unitForm.action = "{{ url_for('add_unit') }}";
+        unitForm.reset();
+        unitModal.show();
+    });
+
+    // Handle "Edit" button clicks
+    document.querySelectorAll('.edit-btn').forEach(button => {
+        button.addEventListener('click', async function() {
+            const unitId = this.dataset.unitId;
+            modalTitle.textContent = 'Edit Unit';
+            unitForm.action = `/units/edit/${unitId}`;
+            
+            // Fetch unit data from API
+            const response = await fetch(`/api/unit/${unitId}`);
+            const data = await response.json();
+
+            // Populate form
+            unitForm.querySelector('#name').value = data.name;
+            unitForm.querySelector('#symbol').value = data.symbol || '';
+            unitForm.querySelector('#base_unit_id').value = data.base_unit_id || '';
+            unitForm.querySelector('#conversion_factor').value = data.conversion_factor || '';
+
+            unitModal.show();
+        });
+    });
+});
+</script>
+{% endblock %}

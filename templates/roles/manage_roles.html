@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">Roles Management</h1>
+            <p class="text-muted mb-0">Manage roles and their permissions for your organization.</p>
+        </div>
+        <a href="{{ url_for('create_role') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle me-1"></i> Create New Role
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+        
+    <!-- Search Form -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('manage_roles') }}" method="GET" class="d-flex">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" name="q" placeholder="Search by Role Name..." value="{{ search_query or '' }}">
+                    <button class="btn btn-outline-secondary" type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('manage_roles') }}" class="btn btn-outline-danger" title="Clear Search">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Roles Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Existing Roles</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Role Name</th>
+                            <th>Description</th>
+                            <th>Users Assigned</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for role, user_count in roles_with_count %}
+                        <tr>
+                            <td>
+                                {{ role.name }}
+                                {% if role.is_admin %}
+                                    <span class="badge bg-primary ms-1">Default Admin</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ role.description }}</td>
+                            <td>
+                                <span class="badge bg-secondary">{{ user_count }}</span>
+                            </td>
+                            <td class="text-end">
+                                {% set default_roles = ['Admin', 'Manager', 'Technician', 'Viewer'] %}
+                                {% if role.name in default_roles %}
+                                    {% if not role.is_admin %}
+                                        <a href="{{ url_for('edit_role', role_id=role.id) }}" class="btn btn-sm btn-outline-primary" title="Edit Permissions">
+                                            <i class="bi bi-pencil-square"></i> Edit
+                                        </a>
+                                    {% endif %}
+                                    <button class="btn btn-sm btn-outline-secondary" disabled>Default Role</button>
+                                {% else %}
+                                    <a href="{{ url_for('edit_role', role_id=role.id) }}" class="btn btn-sm btn-outline-primary" title="Edit Permissions">
+                                        <i class="bi bi-pencil-square"></i> Edit
+                                    </a>
+                                    <form action="{{ url_for('delete_role', role_id=role.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure you want to permanently delete this role?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                            <i class="bi bi-trash"></i> Delete
+                                        </button>
+                                    </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if not roles_with_count %}
+                <div class="text-center p-4">
+                {% if search_query %}
+                    <p class="text-muted">No roles found matching your search for "<strong>{{ search_query }}</strong>".</p>
+                {% else %}
+                    <p class="text-muted">No roles have been created yet.</p>
+                {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
