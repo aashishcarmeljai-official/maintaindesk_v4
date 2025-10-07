@@ -22,7 +22,7 @@
                                 {% for loc in form_data.locations %}<option value="{{ loc.id }}" {% if vendor and vendor.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>{% endfor %}
                             </select>
                             <a href="{{ url_for('add_location') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Location"><i class="bi bi-plus"></i></a>
-                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-api-url="{{ url_for('api_get_locations') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="location" data-api-url="{{ url_for('api_get_locations') }}"><i class="bi bi-arrow-clockwise"></i></button>
                         </div>
                     </div>
                 </div>
@@ -161,14 +161,19 @@
         <div class="card mb-4">
             <div class="card-header"><h5 class="mb-0">Existing Media</h5></div>
             <div class="card-body">
-                {% set media_types = [('images', 'Images', vendor.images), ('videos', 'Videos', vendor.videos), ('audio', 'Audio Files', vendor.audio_files), ('documents', 'Documents', vendor.documents)] %}
-                {% set has_media = false %}
-                {% for folder, title, files in media_types %}{% if files %}{% set has_media = true %}{% endif %}{% endfor %}
-
-                {% if has_media %}
-                    <div class="row gx-2 gy-2">
-                    {% for folder, title, files in media_types %}
-                        {% if files %}
+                {% set media_types = [
+                    ('images', 'Images', vendor.images), 
+                    ('videos', 'Videos', vendor.videos), 
+                    ('audio', 'Audio Files', vendor.audio_files), 
+                    ('documents', 'Documents', vendor.documents)
+                ] %}
+                
+                {% set ns = namespace(has_media=false) %}
+                {% for folder, title, files in media_types %}
+                    {% if files %}
+                        {% set ns.has_media = true %}
+                        <h6 class="mt-3">{{ title }}</h6>
+                        <div class="row gx-2 gy-2">
                             {% for filename in files %}
                             <div class="col-auto">
                                 <div class="card h-100" style="width: 150px;">
@@ -183,11 +188,10 @@
                                         <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p>
                                     </div>
                                     <div class="card-footer p-1">
-                                        <!-- Note: This requires a `delete_vendor_media` route to be created -->
-                                        <form id="delete-form-{{ filename | replace('.', '_') }}" action="#" method="POST">
+                                        <form id="delete-form-{{ filename | replace('.', '_') }}" action="{{ url_for('delete_vendor_media', vendor_id=vendor.id) }}" method="POST">
                                             <input type="hidden" name="filename" value="{{ filename }}">
                                             <input type="hidden" name="file_type" value="{{ 'audio_files' if folder == 'audio' else folder }}">
-                                            <button type="button" class="btn btn-sm btn-danger w-100" onclick="confirmDelete('{{ filename | replace('.', '_') }}')">
+                                            <button type="button" class="btn btn-sm btn-danger w-100 existing-media-delete-btn">
                                                 <i class="bi bi-trash"></i> Delete
                                             </button>
                                         </form>
@@ -195,10 +199,11 @@
                                 </div>
                             </div>
                             {% endfor %}
-                        {% endif %}
-                    {% endfor %}
-                    </div>
-                {% else %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if not ns.has_media %}
                     <p class="text-muted">No media has been uploaded for this vendor yet.</p>
                 {% endif %}
             </div>
@@ -231,20 +236,31 @@ document.addEventListener('DOMContentLoaded', function() {
         const apiUrl = this.dataset.apiUrl;
         const selectInstance = tomSelects['location_id'];
         if (!selectInstance) return;
-        const icon = this.querySelector('i'); icon.classList.add('icon-spin'); this.disabled = true;
+        const icon = this.querySelector('i'); 
+        icon.classList.add('icon-spin'); 
+        this.disabled = true;
         try {
-            const response = await fetch(apiUrl); const data = await response.json(); const selectedValue = selectInstance.getValue();
-            selectInstance.clear(); selectInstance.clearOptions();
+            const response = await fetch(apiUrl);
+            if (!response.ok) throw new Error('Network response failed');
+            const data = await response.json(); 
+            const selectedValue = selectInstance.getValue();
+            selectInstance.clear(); 
+            selectInstance.clearOptions();
             selectInstance.addOptions(data.map(item => ({ value: item.id, text: item.name })));
             if (selectedValue) { selectInstance.setValue(selectedValue, true); }
-        } catch (error) { console.error('Error refreshing location list:', error); } 
-        finally { icon.classList.remove('icon-spin'); this.disabled = false; }
+        } catch (error) { 
+            console.error('Error refreshing location list:', error); 
+        } finally { 
+            icon.classList.remove('icon-spin'); 
+            this.disabled = false; 
+        }
     });
 
     // --- Dynamic Contacts Logic ---
     const contactsContainer = document.getElementById('contacts-container');
     const addContactBtn = document.getElementById('add-contact-btn');
     const contactTemplate = document.getElementById('contact-template');
+    
     function addContactRow() {
         const newRow = contactTemplate.cloneNode(true);
         newRow.style.display = 'flex';
@@ -252,19 +268,22 @@ document.addEventListener('DOMContentLoaded', function() {
         newRow.querySelectorAll('input').forEach(input => input.disabled = false);
         contactsContainer.appendChild(newRow);
     }
+    
     addContactBtn.addEventListener('click', addContactRow);
+    
     contactsContainer.addEventListener('click', function(e) {
         const removeButton = e.target.closest('.remove-contact-btn');
         if (removeButton) {
             removeButton.closest('.contact-row').remove();
         }
     });
-    // Add one empty contact row to start with ONLY if we're on the 'add' page
+    
+    // Add one empty row only on the 'add' page
     {% if not vendor %}
     addContactRow();
     {% endif %}
     
-    // --- ASSOCIATION LIST FILTERING ---
+    // --- Association Filtering ---
     function setupAssociationFilter(inputId, containerId, itemSelector) {
         const searchInput = document.getElementById(inputId);
         const container = document.getElementById(containerId);
@@ -281,45 +300,67 @@ document.addEventListener('DOMContentLoaded', function() {
     setupAssociationFilter('equipment-search', 'equipment-list', '.form-check');
     setupAssociationFilter('inventory-search', 'inventory-list-tbody', 'tr');
 
-    // --- CLIENT-SIDE FILE PREVIEW LOGIC ---
+    // --- Client-side File Preview Logic ---
     function setupFilePreview(inputId, previewContainerId) {
         const fileInput = document.getElementById(inputId);
         const previewContainer = document.getElementById(previewContainerId);
-        if (!fileInput) return;
+        if (!fileInput) return null;
+        
         let fileStore = new DataTransfer();
-        fileInput.addEventListener('change', function() {
-            for (let i = 0; i < this.files.length; i++) { fileStore.items.add(this.files[i]); }
-            this.files = fileStore.files;
+
+        fileInput.addEventListener('change', function(event) {
+            const files = event.target.files;
+            for (let i = 0; i < files.length; i++) {
+                fileStore.items.add(files[i]);
+            }
+            fileInput.files = fileStore.files;
             renderPreviews();
         });
+
         function renderPreviews() {
             previewContainer.innerHTML = '';
+            
             Array.from(fileStore.files).forEach((file, index) => {
-                const wrapper = document.createElement('div'); wrapper.className = 'col-auto';
-                const card = document.createElement('div'); card.className = 'card h-100 position-relative'; card.style.width = '120px';
+                const wrapper = document.createElement('div');
+                wrapper.className = 'col-auto';
+                const card = document.createElement('div');
+                card.className = 'card h-100 position-relative';
+                card.style.width = '120px';
                 const removeBtn = document.createElement('button');
                 removeBtn.className = 'btn btn-sm btn-danger position-absolute top-0 end-0 m-1 p-0 lh-1';
                 removeBtn.style.cssText = 'width: 1.2rem; height: 1.2rem;';
-                removeBtn.innerHTML = '&times;'; removeBtn.type = 'button'; removeBtn.title = 'Remove ' + file.name;
+                removeBtn.innerHTML = '&times;';
+                removeBtn.type = 'button';
+                removeBtn.title = 'Remove ' + file.name;
+
                 removeBtn.onclick = function() {
-                    fileStore.items.remove(index);
+                    const newFileStore = new DataTransfer();
+                    const currentFiles = Array.from(fileStore.files);
+                    
+                    currentFiles.forEach((f, i) => {
+                        if (i !== index) {
+                            newFileStore.items.add(f);
+                        }
+                    });
+                    
+                    fileStore = newFileStore;
                     fileInput.files = fileStore.files;
                     renderPreviews();
                 };
-                let content = '';
+
                 if (file.type.startsWith('image/')) {
                     const reader = new FileReader();
                     reader.onload = function(e) {
-                        content = `<img src="${e.target.result}" class="card-img-top" style="object-fit: cover; height: 80px;" alt="Preview">`;
+                        const content = `<img src="${e.target.result}" class="card-img-top" style="object-fit: cover; height: 80px;" alt="Preview">`;
                         card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
                         card.prepend(removeBtn);
-                    }
+                    };
                     reader.readAsDataURL(file);
                 } else {
                     let icon = 'bi-file-earmark-text';
                     if (file.type.startsWith('video/')) icon = 'bi-film';
                     if (file.type.startsWith('audio/')) icon = 'bi-music-note-beamed';
-                    content = `<div class="text-center p-3"><i class="bi ${icon} fs-2"></i></div>`;
+                    const content = `<div class="text-center p-3"><i class="bi ${icon} fs-2"></i></div>`;
                     card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
                     card.prepend(removeBtn);
                 }
@@ -327,19 +368,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 previewContainer.appendChild(wrapper);
             });
         }
+        
+        // Return an object with a method to add files externally
+        return {
+            addFile: function(file) {
+                fileStore.items.add(file);
+                fileInput.files = fileStore.files;
+                renderPreviews();
+            }
+        };
     }
-    setupFilePreview('images', 'images-preview');
-    setupFilePreview('videos', 'videos-preview');
-    setupFilePreview('audio_files', 'audio_files-preview');
-    setupFilePreview('documents', 'documents-preview');
-});
+    
+    // Initialize preview handlers and store them globally for mediaCapture.js
+    window.previewHandlers = {
+        images: setupFilePreview('images', 'images-preview'),
+        videos: setupFilePreview('videos', 'videos-preview'),
+        audio_files: setupFilePreview('audio_files', 'audio_files-preview'),
+        documents: setupFilePreview('documents', 'documents-preview')
+    };
 
-// --- MEDIA DELETION CONFIRMATION (for existing media on edit page) ---
-function confirmDelete(filename) {
-    if (confirm('Are you sure you want to permanently delete this file?')) {
-        document.getElementById('delete-form-' + filename.replace(/\./g, '_')).submit();
-    }
-}
-window.confirmDelete = confirmDelete;
+    // --- EVENT LISTENER FOR EXISTING MEDIA DELETE BUTTONS ---
+    document.querySelectorAll('.existing-media-delete-btn').forEach(button => {
+        button.addEventListener('click', function(event) {
+            if (confirm('Are you sure you want to permanently delete this file?')) {
+                event.target.closest('form').submit();
+            }
+        });
+    });
+});
 </script>
 {% endblock %}

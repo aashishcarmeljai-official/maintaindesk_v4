@@ -145,15 +145,16 @@
         <div class="card-header"><h5 class="mb-0">Existing Media</h5></div>
         <div class="card-body">
             {% set media_types = [
-                ('images', 'Images', equipment.images), 
-                ('videos', 'Videos', equipment.videos), 
-                ('audio', 'Audio Files', equipment.audio_files), 
+                ('images', 'Images', equipment.images),
+                ('videos', 'Videos', equipment.videos),
+                ('audio', 'Audio Files', equipment.audio_files),
                 ('documents', 'Documents', equipment.documents)
             ] %}
-            {% set has_media = false %}
+            
+            {% set ns = namespace(has_media=false) %}
             {% for folder, title, files in media_types %}
                 {% if files %}
-                    {% set has_media = true %}
+                    {% set ns.has_media = true %}
                     <h6 class="mt-3">{{ title }}</h6>
                     <div class="row gx-2 gy-2">
                         {% for filename in files %}
@@ -172,8 +173,8 @@
                                 <div class="card-footer p-1">
                                     <form id="delete-form-{{ filename | replace('.', '_') }}" action="{{ url_for('delete_equipment_media', equip_id=equipment.id) }}" method="POST">
                                         <input type="hidden" name="filename" value="{{ filename }}">
-                                        <input type="hidden" name="file_type" value="{{ 'audio_files' if folder == 'audio' else folder }}">
-                                        <button type="button" class="btn btn-sm btn-danger w-100" onclick="confirmDelete('{{ filename | replace('.', '_') }}')">
+                                        <input type="hidden" name="file_type" value="{{ 'audio_files' if folder == 'audio' else folder }}">                                          
+                                        <button type="button" class="btn btn-sm btn-danger w-100 existing-media-delete-btn">
                                             <i class="bi bi-trash"></i> Delete
                                         </button>
                                     </form>
@@ -184,7 +185,8 @@
                     </div>
                 {% endif %}
             {% endfor %}
-            {% if not has_media %}
+            
+            {% if not ns.has_media %}
                 <p class="text-muted">No media has been uploaded for this equipment yet.</p>
             {% endif %}
         </div>
@@ -203,173 +205,5 @@
 {% endblock %}
 
 {% block scripts %}
-<link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
-<script src="{{ url_for('static', filename='js/mediaCapture.js') }}"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // --- PART 1: PAGE-SPECIFIC LOGIC (ID Generation, Dropdowns, Refresh) ---
-
-    // ID Generation (Handles both Equipment and Inventory)
-    const nameInput = document.getElementById('name');
-    const idInput = document.getElementById('equipment_id') || document.getElementById('part_number');
-    if (idInput && !idInput.value) {
-        const prefix = (idInput.id === 'equipment_id') ? 'EQ' : 'PART';
-        nameInput.addEventListener('keyup', function() {
-            const name = this.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/\s+/g, '-');
-            idInput.value = `${prefix}-${name}-${Date.now().toString().slice(-6)}`;
-        });
-    }
-
-    // TomSelect Initialization
-    const tomSelects = {};
-    const selectIds = ['category_id', 'location_id', 'department_id', 'currency_id', 'unit_of_measure_id', 'manufacturer_id'];
-    selectIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            let config = { create: false, placeholder: 'Select...' };
-            if (id === 'currency_id') {
-                config.render = {
-                    option: (data, escape) => `<div>${escape(data.text)} ${data.symbol ? `(${escape(data.symbol)})` : ''}</div>`,
-                    item: (data, escape) => `<div>${escape(data.text)} ${data.symbol ? `(${escape(data.symbol)})` : ''}</div>`
-                };
-            }
-            tomSelects[id] = new TomSelect(el, config);
-        }
-    });
-
-    // --- REFRESH LOGIC ---
-    document.querySelectorAll('.refresh-btn').forEach(button => {
-        button.addEventListener('click', async function() {
-            const type = this.dataset.type;
-            const apiUrl = this.dataset.apiUrl;
-            
-            // --- More flexible mapping of data-type to element ID ---
-            const typeToIdMap = {
-                'category': 'category_id',
-                'location': 'location_id',
-                'department': 'department_id',
-                'manufacturer': 'manufacturer_id',
-                'currency': 'currency_id',
-                'unit_of_measure': 'unit_of_measure_id'
-            };
-            const selectId = typeToIdMap[type];
-            // --- End of flexible mapping ---
-
-            const selectInstance = tomSelects[selectId];
-            if (!selectInstance) {
-                console.error(`TomSelect instance not found for ID: ${selectId}`);
-                return;
-            }
-
-            const icon = this.querySelector('i');
-            icon.classList.add('icon-spin');
-            this.disabled = true;
-
-            try {
-                const response = await fetch(apiUrl);
-                if (!response.ok) throw new Error('Network response was not ok');
-                const data = await response.json();
-                const selectedValue = selectInstance.getValue();
-
-                selectInstance.clear();
-                selectInstance.clearOptions();
-
-                // --- Generic Option Formatting ---
-                let newOptions;
-                if (type === 'unit_of_measure') {
-                    newOptions = data.map(item => ({ value: item.id, text: `${item.name} (${item.symbol || ''})` }));
-                } else if (type === 'currency') {
-                    newOptions = data.map(item => ({ value: item.id, text: item.code, symbol: item.symbol }));
-                } else { // Handles category, location, department, and manufacturer
-                    newOptions = data.map(item => ({ value: item.id, text: item.name }));
-                }
-                // --- End of formatting ---
-                
-                selectInstance.addOptions(newOptions);
-                if (selectedValue) {
-                    selectInstance.setValue(selectedValue, true);
-                }
-            } catch (error) {
-                console.error(`Error refreshing '${type}' list:`, error);
-                alert(`Could not refresh the ${type} list. Please check the console for details.`);
-            } finally {
-                icon.classList.remove('icon-spin');
-                this.disabled = false;
-            }
-        });
-    });
-
-    // --- PART 2: GENERIC PREVIEW LOGIC ---
-    // This is identical for both forms.
-    function setupFilePreview(inputId, previewContainerId) {
-        const fileInput = document.getElementById(inputId);
-        const previewContainer = document.getElementById(previewContainerId);
-        if (!fileInput) return;
-        let fileStore = new DataTransfer();
-        fileInput.addEventListener('change', function() {
-            // Add any newly selected files to our store
-            for (let i = 0; i < this.files.length; i++) {
-                fileStore.items.add(this.files[i]);
-            }
-            // The crucial step: update the input's files with the managed list
-            this.files = fileStore.files;
-            renderPreviews();
-        });
-
-        function renderPreviews() {
-            previewContainer.innerHTML = '';
-            Array.from(fileStore.files).forEach((file, index) => {
-                const wrapper = document.createElement('div');
-                wrapper.className = 'col-auto';
-                const card = document.createElement('div');
-                card.className = 'card h-100 position-relative';
-                card.style.width = '120px';
-                const removeBtn = document.createElement('button');
-                removeBtn.className = 'btn btn-sm btn-danger position-absolute top-0 end-0 m-1 p-0 lh-1';
-                removeBtn.style.cssText = 'width: 1.2rem; height: 1.2rem;';
-                removeBtn.innerHTML = '&times;';
-                removeBtn.type = 'button';
-                removeBtn.title = 'Remove ' + file.name;
-                removeBtn.onclick = function() {
-                    fileStore.items.remove(index);
-                    fileInput.files = fileStore.files; // Update the input again
-                    renderPreviews(); // Re-render the UI
-                };
-                let content = '';
-                if (file.type.startsWith('image/')) {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        content = `<img src="${e.target.result}" class="card-img-top" style="object-fit: cover; height: 80px;" alt="Preview">`;
-                        card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
-                        card.prepend(removeBtn);
-                    }
-                    reader.readAsDataURL(file);
-                } else {
-                    let icon = 'bi-file-earmark-text';
-                    if (file.type.startsWith('video/')) icon = 'bi-film';
-                    if (file.type.startsWith('audio/')) icon = 'bi-music-note-beamed';
-                    content = `<div class="text-center p-3"><i class="bi ${icon} fs-2"></i></div>`;
-                    card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
-                    card.prepend(removeBtn);
-                }
-                wrapper.appendChild(card);
-                previewContainer.appendChild(wrapper);
-            });
-        }
-    }
-    setupFilePreview('images', 'images-preview');
-    setupFilePreview('videos', 'videos-preview');
-    setupFilePreview('audio_files', 'audio_files-preview');
-    setupFilePreview('documents', 'documents-preview');
-});
-
-// --- MEDIA DELETION CONFIRMATION ---
-function confirmDelete(filename) {
-    if (confirm('Are you sure you want to permanently delete this file?')) {
-        document.getElementById('delete-form-' + filename.replace(/\./g, '_')).submit();
-    }
-}
-window.confirmDelete = confirmDelete;
-</script>
+    {% include 'partials/_form_scripts.html' %}
 {% endblock %}

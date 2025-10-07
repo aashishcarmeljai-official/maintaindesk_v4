@@ -6,17 +6,19 @@ import json
 import uuid
 import random
 import string
+from flask_mail import Mail, Message
 from functools import wraps
 from dotenv import load_dotenv
-from datetime import datetime, timezone
-from flask import Flask, render_template, redirect, url_for, request, flash, session, abort, jsonify, Response
+from datetime import datetime, timezone, timedelta
+from flask import Flask, render_template, redirect, url_for, request, session, abort, jsonify, Response
+from flask import flash as flask_flash, g
 from flask_session import Session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, user_logged_in
-from models import db, bcrypt, User, Company, Role, Location, Permission, Category, Department, Equipment, Unit, Currency, InventoryItem, Vendor, VendorContact
+from models import db, bcrypt, User, Company, Role, Location, Permission, Category, Department, Equipment, Unit, Currency, InventoryItem, Vendor, VendorContact, Team, team_members, NotificationLog, WorkOrder
 from sqlalchemy import func, cast, text, case
 import pycountry
 from sqlalchemy.orm.attributes import flag_modified
-from sqlalchemy.orm import joinedload, aliased
+from sqlalchemy.orm import joinedload, aliased, undefer
 from werkzeug.utils import secure_filename
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -33,6 +35,17 @@ app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'static', 'uploads')
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_TYPE"] = "filesystem"
 Session(app)
+
+# --- MAIL CONFIGURATION ---
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 465))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'false').lower() in ['true', '1']
+app.config['MAIL_USE_SSL'] = os.getenv('MAIL_USE_SSL', 'true').lower() in ['true', '1']
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER')
+
+mail = Mail(app)
 
 ADMIN_PASS_FILE = os.path.join(app.root_path, 'admin_password.json')
 ORG_DATA_FILE = os.path.join(app.root_path, 'o_d.json')
@@ -123,7 +136,8 @@ def create_default_roles_and_permissions(company_id):
         'CAN_CREATE_WORK_ORDER', 'CAN_EDIT_WORK_ORDER', 'CAN_DELETE_WORK_ORDER',
         'CAN_MANAGE_ASSETS', 'CAN_VIEW_REPORTS', 'CAN_MANAGE_CATEGORIES', 'CAN_MANAGE_DEPARTMENTS',
         'CAN_MANAGE_LOCATIONS', 'CAN_MANAGE_EQUIPMENT', 'CAN_MANAGE_UNITS', 'CAN_MANAGE_CURRENCIES',
-        'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS'
+        'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS', 'CAN_MANAGE_TEAMS', 'CAN_CREATE_WORK_ORDER',
+        'CAN_APPROVE_WORK_ORDER', 'CAN_MANAGE_ALL_WORK_ORDERS'
     ]
     all_permissions = []
     for name in permission_names:
@@ -136,9 +150,9 @@ def create_default_roles_and_permissions(company_id):
 
     roles_config = {
         'Admin': {'desc': 'Full access to all system features.', 'is_admin': True, 'perms': permission_names, 'level': 0},
-        'Manager': {'desc': 'Can manage work orders, assets, and users.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_CREATE_WORK_ORDER', 'CAN_EDIT_WORK_ORDER', 'CAN_MANAGE_ASSETS', 'CAN_MANAGE_USERS', 'CAN_MANAGE_CATEGORIES', 'CAN_MANAGE_DEPARTMENTS', 'CAN_MANAGE_LOCATIONS', 'CAN_MANAGE_EQUIPMENT', 'CAN_MANAGE_UNITS', 'CAN_MANAGE_CURRENCIES', 'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS'], 'level': 10},
-        'Technician': {'desc': 'Can view and update assigned work orders.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_EDIT_WORK_ORDER'], 'level': 20},
-        'Viewer': {'desc': 'Read-only access to dashboards and reports.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_VIEW_REPORTS'], 'level': 30}
+        'Manager': {'desc': 'Can manage work orders, assets, and users.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_CREATE_WORK_ORDER', 'CAN_EDIT_WORK_ORDER', 'CAN_MANAGE_ASSETS', 'CAN_MANAGE_USERS', 'CAN_MANAGE_CATEGORIES', 'CAN_MANAGE_DEPARTMENTS', 'CAN_MANAGE_LOCATIONS', 'CAN_MANAGE_EQUIPMENT', 'CAN_MANAGE_UNITS', 'CAN_MANAGE_CURRENCIES', 'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS', 'CAN_MANAGE_TEAMS', 'CAN_CREATE_WORK_ORDER', 'CAN_APPROVE_WORK_ORDER', 'CAN_MANAGE_ALL_WORK_ORDERS'], 'level': 10},
+        'Technician': {'desc': 'Can view and update assigned work orders.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_EDIT_WORK_ORDER', 'CAN_CREATE_WORK_ORDER'], 'level': 20},
+        'Viewer': {'desc': 'Read-only access to dashboards and reports.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_VIEW_REPORTS', 'CAN_CREATE_WORK_ORDER'], 'level': 30}
     }
 
     for name, config in roles_config.items():
@@ -474,6 +488,64 @@ def check_password_reset_required():
             flash('For your security, you must change your temporary password before proceeding.', 'warning')
             return redirect(url_for('change_password'))
         
+@app.after_request
+def commit_notification_logs(response):
+    """
+    Runs after each request. If any notification logs were queued,
+    this function commits them to the database.
+    """
+    # Check if the queue exists and has items
+    if hasattr(g, 'notification_logs') and g.notification_logs:
+        try:
+            for log_data in g.notification_logs:
+                log_entry = NotificationLog(**log_data)
+                db.session.add(log_entry)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error committing notification logs: {e}")
+    return response
+        
+# --- CUSTOM ERROR HANDLERS ---
+        
+@app.errorhandler(403)
+def forbidden_error(error):
+    """
+    Custom handler for 403 Forbidden errors.
+    Flashes a message and redirects the user.
+    """
+    flash('You do not have the required permissions to access this page.', 'danger')
+    
+    # Try to redirect to the user's previous page, with a fallback to the index.
+    # The 'referrer' header contains the URL of the page the user was on before this request.
+    return redirect(request.referrer or url_for('index'))
+
+# --- CUSTOM FLASH FUNCTION ---
+
+def flash(message, category='message'):
+    """
+    Custom flash function that queues a message to be logged to the DB
+    at the end of the request.
+    """
+    if current_user.is_authenticated:
+        # If the log queue doesn't exist for this request, create it
+        if 'notification_logs' not in g:
+            g.notification_logs = []
+        
+        log_message = str(message)
+        if category == 'credentials':
+            log_message = "A new user's credentials were generated."
+
+        # Add the log data to our request-specific queue
+        g.notification_logs.append({
+            'user_id': current_user.id,
+            'message': log_message,
+            'category': category
+        })
+
+    # Call the original Flask flash function
+    flask_flash(message, category)
+        
 # --- ROLE MANAGEMENT ROUTES ---
 
 @app.route('/roles')
@@ -679,11 +751,10 @@ def add_user():
             db.session.commit()
 
             # --- Success Feedback ---
-            # Use specific categories to allow for different styling/icons in the template
-            flash(f'User "{first_name}" created successfully! Please provide them with their login credentials below.', 'success')
+            flash(f'User "{first_name}" created successfully! Provide them with their credentials below.', 'success')
             flash(f'Username: {username}', 'info')
-            # Use a special category 'password'
-            flash(f'{password}', 'password')
+            # Flash a tuple: (password, new_user_id) with a special category
+            flash((password, new_user.id), 'credentials')
             
             return redirect(url_for('manage_users'))
 
@@ -883,6 +954,375 @@ def edit_user(user_id):
     next_url = request.args.get('next', url_for('manage_users'))
     form_data = get_profile_form_data()
     return render_template('profile/edit.html', user=user_to_edit, is_admin=is_current_user_admin, form_data=form_data, next_url=next_url)
+
+def send_invite_email(user):
+    """Generates and sends a password-setting email to a new user."""
+    token = user.get_reset_token(expires_sec=604800) # Token valid for 7 days
+    msg = Message(
+        'Welcome to MaintainDesk! Set Your Password',
+        recipients=[user.email]
+    )
+    # The _external=True is crucial to generate a full URL
+    invite_url = url_for('set_password_from_invite', token=token, _external=True)
+    
+    # You can use a nice HTML template for this email
+    msg.body = f'''Welcome to MaintainDesk!
+
+To set up your account and choose your password, please visit the following link:
+{invite_url}
+
+If you did not expect this invitation, you can safely ignore this email.
+
+Thanks,
+The MaintainDesk Team
+'''
+    try:
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        return False
+    
+def send_work_order_assignment_email(work_order):
+    """Sends a notification email to an assigned user or all members of an assigned team."""
+    
+    # Determine the recipient(s)
+    recipients = []
+    assigned_to_name = "Unassigned"
+    if work_order.assigned_user:
+        recipients.append(work_order.assigned_user.email)
+        assigned_to_name = f"{work_order.assigned_user.first_name} {work_order.assigned_user.last_name}"
+    elif work_order.assigned_team:
+        # Eagerly load members if not already loaded
+        team = Team.query.options(joinedload(Team.members)).get(work_order.assigned_to_team_id)
+        recipients = [member.email for member in team.members]
+        assigned_to_name = f"{team.name} (Team)"
+
+    if not recipients:
+        return # Do nothing if no one is assigned
+
+    msg = Message(
+        f"New Work Order Assigned: #{work_order.id} - {work_order.title}",
+        recipients=recipients
+    )
+
+    # Use a simple but informative HTML template for the email
+    view_url = url_for('view_work_order', wo_id=work_order.id, _external=True)
+    msg.html = f"""
+    <p>Hello,</p>
+    <p>A new work order has been assigned to you or your team:</p>
+    <h3><a href="{view_url}">Work Order #{work_order.id}: {work_order.title}</a></h3>
+    <ul>
+        <li><strong>Equipment:</strong> {work_order.equipment.name if work_order.equipment else 'N/A'}</li>
+        <li><strong>Location:</strong> {work_order.location.name if work_order.location else 'N/A'}</li>
+        <li><strong>Priority:</strong> {work_order.priority}</li>
+        <li><strong>Assigned To:</strong> {assigned_to_name}</li>
+        <li><strong>Due Date:</strong> {work_order.due_date.strftime('%Y-%m-%d') if work_order.due_date else 'Not set'}</li>
+    </ul>
+    <p>Please review the details at your earliest convenience.</p>
+    <p>Thanks,<br>The MaintainDesk System</p>
+    """
+    
+    try:
+        mail.send(msg)
+        print(f"Work order assignment email sent for WO #{work_order.id}")
+    except Exception as e:
+        print(f"Error sending WO assignment email for WO #{work_order.id}: {e}")
+        
+def send_approval_request_email(work_order):
+    """Finds all users with approval permissions and sends them a notification."""
+    
+    approver_permission = Permission.query.filter_by(name='CAN_APPROVE_WORK_ORDER').first()
+    if not approver_permission:
+        print("Warning: CAN_APPROVE_WORK_ORDER permission not found.")
+        return
+
+    approvers = User.query.join(Role).filter(
+        User.company_id == work_order.company_id,
+        User.is_active == True,
+        db.or_(
+            Role.is_admin == True,
+            Role.permissions.contains(approver_permission)
+        )
+    ).all()
+
+    if not approvers:
+        print(f"Warning: No active approvers found for company ID {work_order.company_id} to approve WO #{work_order.id}")
+        return
+
+    # Separate the list of emails.
+    recipient_emails = [user.email for user in approvers]
+    
+    # Use the first approver as the main recipient and BCC the rest.
+    # This prevents the email from going to the creator.
+    main_recipient = recipient_emails.pop(0)
+    bcc_recipients = recipient_emails # The rest of the list
+    
+    msg = Message(
+        f"New Work Order Request for Approval: #{work_order.id}",
+        recipients=[main_recipient],
+        bcc=bcc_recipients
+    )
+
+    requests_url = url_for('manage_work_orders', _external=True)
+    msg.html = f"""
+    <p>A new work order has been submitted and requires approval.</p>
+    <h3>Work Order #{work_order.id}: {work_order.title}</h3>
+    <ul>
+        <li><strong>Created By:</strong> {work_order.created_by.first_name} {work_order.created_by.last_name}</li>
+        <li><strong>Equipment:</strong> {work_order.equipment.name if work_order.equipment else 'N/A'}</li>
+        <li><strong>Priority:</strong> {work_order.priority}</li>
+    </ul>
+    <p>Please visit the Work Orders page in MaintainDesk to review and approve or reject this request.</p>
+    <p><a href="{requests_url}">View Work Order Requests</a></p>
+    """
+    
+    try:
+        mail.send(msg)
+        print(f"Approval request email sent for WO #{work_order.id} to {len(approvers)} approvers.")
+    except Exception as e:
+        print(f"Error sending approval request email for WO #{work_order.id}: {e}")
+        
+def send_wo_status_change_email(work_order, is_approved):
+    """Emails the creator of a work order about its approval or rejection."""
+    creator = work_order.created_by
+    if not creator or not creator.email:
+        return # Cannot send email if creator is not found
+
+    status_text = "Approved" if is_approved else "Rejected"
+    
+    msg = Message(
+        f"Update on Your Work Order Request: #{work_order.id} - {status_text}",
+        recipients=[creator.email]
+    )
+
+    if is_approved:
+        view_url = url_for('view_work_order', wo_id=work_order.id, _external=True)
+        link_text = f"<h3><a href=\"{view_url}\">Work Order #{work_order.id}: {work_order.title}</a></h3>"
+    else:
+        view_url = url_for('manage_work_orders', _external=True)
+        link_text = f"<h3>Work Order Request #{work_order.id}: {work_order.title}</h3>" # Not a link
+    
+    rejection_reason_html = ""
+    if not is_approved and work_order.rejection_reason:
+        rejection_reason_html = f"<p><strong>Reason for Rejection:</strong> {work_order.rejection_reason}</p>"
+
+    msg.html = f"""
+    <p>Hello {creator.first_name},</p>
+    <p>An update has been made to a work order you requested:</p>
+    {link_text}
+    <p>The new status is: <strong>{status_text}</strong></p>
+    {rejection_reason_html}
+    <p>You can view your work orders for more details.</p>
+    <p>Thanks,<br>The MaintainDesk System</p>
+    """
+    
+    try:
+        mail.send(msg)
+    except Exception as e:
+        print(f"Error sending WO status change email for WO #{work_order.id}: {e}")
+
+@app.route('/users/invite', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def invite_user():
+    form_data = get_profile_form_data()
+    if request.method == 'POST':
+        # --- This logic is almost identical to add_user ---
+        first_name = request.form.get('first_name', '').strip()
+        email = request.form.get('email', '').strip()
+        role_id = request.form.get('role_id')
+
+        if not all([first_name, email, role_id]):
+            flash('First Name, Email, and Role are required fields.', 'danger')
+            return render_template('users/invite_form.html', form_data=form_data)
+        
+        if User.query.filter_by(company_id=current_user.company_id, email=email).first():
+            flash(f'A user with the email "{email}" already exists.', 'warning')
+            return render_template('users/invite_form.html', form_data=form_data)
+
+        username = generate_unique_username(first_name, current_user.company_id)
+        
+        new_user = User(
+            company_id=current_user.company_id,
+            first_name=first_name,
+            last_name=request.form.get('last_name', '').strip(),
+            username=username,
+            email=email,
+            role_id=role_id,
+            department_id=request.form.get('department_id') or None,
+            phone=request.form.get('phone'),
+            is_active='is_active' in request.form,
+            # We set a placeholder password that can't be used
+            password_hash=bcrypt.generate_password_hash('!UNSET_PASSWORD!').decode('utf-8')
+        )
+        db.session.add(new_user)
+        db.session.commit()
+
+        # --- Send the invitation email ---
+        if send_invite_email(new_user):
+            flash(f'Invitation sent successfully to {email}.', 'success')
+        else:
+            flash('User was created, but the invitation email could not be sent. Please check mail server configuration.', 'danger')
+        
+        return redirect(url_for('invite_user'))
+
+    return render_template('users/invite_form.html', form_data=form_data)
+
+
+@app.route('/users/set-password/<token>', methods=['GET', 'POST'])
+def set_password_from_invite(token):
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+
+    user = User.verify_reset_token(token)
+    if not user:
+        flash('That is an invalid or expired invitation link.', 'danger')
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
+        if password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            # --- FIX IS HERE ---
+            return render_template('users/set_password_form.html', token=token, hide_sidebar=True)
+
+        user.set_password(password)
+        user.password_reset_required = False
+        db.session.commit()
+        flash('Your password has been set! You can now log in.', 'success')
+        return redirect(url_for('login'))
+
+    # --- AND FIX IS HERE ---
+    return render_template('users/set_password_form.html', token=token, hide_sidebar=True)
+
+@app.route('/users/bulk-invite', methods=['POST'])
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def bulk_invite_users():
+    if 'csv_file' not in request.files:
+        flash('No file part in the request.', 'danger')
+        return redirect(url_for('invite_user'))
+    
+    file = request.files['csv_file']
+    if file.filename == '' or not file.filename.endswith('.csv'):
+        flash('Please select a valid .csv file to upload.', 'danger')
+        return redirect(url_for('invite_user'))
+
+    error_count = 0
+    newly_created_users = [] # Store the user objects to email them later
+
+    try:
+        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+        csv_reader = csv.DictReader(stream)
+        
+        # Pre-fetch for efficiency
+        company_roles = {role.name.lower(): role for role in Role.query.filter_by(company_id=current_user.company_id).all()}
+        company_depts = {dept.name.lower(): dept for dept in Department.query.filter_by(company_id=current_user.company_id).all()}
+
+        rows_to_process = list(csv_reader) # Read all rows into a list
+        if not rows_to_process:
+            flash('The uploaded CSV file is empty.', 'warning')
+            return redirect(url_for('invite_user'))
+
+        for row_num, row in enumerate(rows_to_process, 2):
+            first_name = row.get('FirstName', '').strip()
+            email = row.get('Email', '').strip()
+            role_name = row.get('Role', '').strip()
+
+            # --- Row-level Validation (same as bulk_import) ---
+            if not all([first_name, email, role_name]):
+                error_count += 1; flash(f"Skipping row {row_num}: Missing required fields.", 'warning'); continue
+            if User.query.filter_by(company_id=current_user.company_id, email=email).first():
+                error_count += 1; flash(f"Skipping row {row_num}: Email '{email}' already exists.", 'warning'); continue
+            role = company_roles.get(role_name.lower())
+            if not role:
+                error_count += 1; flash(f"Skipping row {row_num}: Role '{role_name}' does not exist.", 'warning'); continue
+            
+            dept_name = row.get('Department', '').strip()
+            department = company_depts.get(dept_name.lower()) if dept_name else None
+            username = generate_unique_username(first_name, current_user.company_id)
+            
+            new_user = User(
+                company_id=current_user.company_id, first_name=first_name,
+                last_name=row.get('LastName', '').strip(), email=email,
+                username=username, role_id=role.id,
+                department_id=department.id if department else None, phone=row.get('Phone', '').strip(),
+                is_active=True, password_hash=bcrypt.generate_password_hash('!UNSET_PASSWORD!').decode('utf-8')
+            )
+            db.session.add(new_user)
+            newly_created_users.append(new_user)
+        
+        # --- Commit all users in one transaction ---
+        db.session.commit()
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'A critical error occurred during the import process: {e}', 'danger')
+        return redirect(url_for('invite_user'))
+
+    # --- 3. Send Emails AFTER successful commit ---
+    email_success_count = 0
+    email_fail_count = 0
+    if newly_created_users:
+        for user in newly_created_users:
+            if send_invite_email(user):
+                email_success_count += 1
+            else:
+                email_fail_count += 1
+    
+    # --- 4. Final Feedback ---
+    if email_success_count > 0:
+        flash(f'Successfully created and sent {email_success_count} invitations.', 'success')
+    if email_fail_count > 0:
+        flash(f'Created {email_fail_count} users, but failed to send their invitation emails. Please check mail server configuration.', 'danger')
+    if error_count > 0:
+        flash(f'Skipped {error_count} rows from the CSV due to errors or existing data.', 'warning')
+
+    return redirect(url_for('invite_user'))
+
+@app.route('/users/send-credentials/<int:user_id>', methods=['POST'])
+@login_required
+@permission_required('CAN_MANAGE_USERS')
+def send_credentials_email(user_id):
+    user = User.query.get_or_404(user_id)
+    if user.company_id != current_user.company_id:
+        abort(403)
+
+    # We need the password, but it's hashed. This is why this feature
+    # can only be used immediately after creation, when we have the password.
+    password = request.form.get('password')
+    if not password:
+        flash('Password not provided. Cannot send email.', 'danger')
+        return redirect(url_for('manage_users'))
+
+    msg = Message(
+        'Your New Account Credentials for MaintainDesk',
+        recipients=[user.email]
+    )
+    
+    # It's good practice to use a simple HTML template for emails
+    msg.html = f"""
+    <p>Hello {user.first_name},</p>
+    <p>An account has been created for you on MaintainDesk.</p>
+    <p>You can log in using the following credentials:</p>
+    <ul>
+        <li><strong>Login Email:</strong> {user.email}</li>
+        <li><strong>Initial Password:</strong> <code>{password}</code></li>
+    </ul>
+    <p>For your security, you will be required to change this password upon your first login.</p>
+    <p>Thanks,<br>The MaintainDesk Team</p>
+    """
+    
+    try:
+        mail.send(msg)
+        flash(f'Credentials successfully sent to {user.email}.', 'success')
+    except Exception as e:
+        print(f"Error sending credentials email: {e}")
+        flash('Failed to send email. Please check your mail server configuration.', 'danger')
+
+    return redirect(url_for('manage_users'))
 
 # --- CATEGORY MANAGEMENT ROUTES ---
 
@@ -1275,14 +1715,13 @@ def view_equipment(equip_id):
 @permission_required('CAN_MANAGE_EQUIPMENT')
 def edit_equipment(equip_id):
     equipment = Equipment.query.get_or_404(equip_id)
-    
     if equipment.company_id != current_user.company_id:
         abort(403)
 
     if request.method == 'POST':
         save_actions = [] # Initialize here
         try:
-            # Step 1: Update text-based fields
+            # --- 1. Update text-based fields ---
             equipment.name = request.form.get('name')
             equipment.equipment_id = request.form.get('equipment_id')
             equipment.category_id = request.form.get('category_id')
@@ -1298,23 +1737,28 @@ def edit_equipment(equip_id):
             equipment.department_id = request.form.get('department_id') or None
             equipment.description = request.form.get('description')
             equipment.specifications = request.form.get('specifications')
-
-            # Step 2: Handle new file uploads using the new helper
-            save_actions = process_uploads(equipment, request.files, 'equipment')
             
-            # Step 3: Flag modified fields for SQLAlchemy
-            from sqlalchemy.orm.attributes import flag_modified
+            # --- 2. Handle new file uploads ---
+            # Call the generic helper and unpack BOTH return values
+            newly_saved_files, save_actions = process_uploads(equipment, request.files, 'equipment')
+            
+            # Merge new filenames with existing ones
+            if newly_saved_files['images']: equipment.images = (equipment.images or []) + newly_saved_files['images']
+            if newly_saved_files['videos']: equipment.videos = (equipment.videos or []) + newly_saved_files['videos']
+            if newly_saved_files['audio_files']: equipment.audio_files = (equipment.audio_files or []) + newly_saved_files['audio_files']
+            if newly_saved_files['documents']: equipment.documents = (equipment.documents or []) + newly_saved_files['documents']
+            
+            # Flag the JSONB fields as modified
             flag_modified(equipment, "images")
             flag_modified(equipment, "videos")
             flag_modified(equipment, "audio_files")
             flag_modified(equipment, "documents")
 
-            # --- Transactional Logic ---
-            db.session.commit() # Commit DB changes first
-
-            for file, save_path in save_actions: # Run file saves only after successful commit
+            # --- 3. Commit DB changes, then save files ---
+            db.session.commit()
+            for file, save_path in save_actions:
                 file.save(save_path)
-
+                
             flash(f'Equipment "{equipment.name}" updated successfully.', 'success')
         except Exception as e:
             db.session.rollback()
@@ -1323,6 +1767,7 @@ def edit_equipment(equip_id):
 
         return redirect(url_for('manage_equipment'))
 
+    # For a GET request
     return render_template('equipment/form.html', equipment=equipment, form_data=get_form_data())
 
 @app.route('/equipment/delete/<int:equip_id>', methods=['POST'])
@@ -1447,6 +1892,31 @@ def api_get_units():
 def api_get_vendors():
     vendors = Vendor.query.filter_by(company_id=current_user.company_id).order_by(Vendor.name).all()
     return jsonify([{'id': v.id, 'name': v.name} for v in vendors])
+
+@app.route('/api/equipment')
+@login_required
+def api_get_equipment():
+    equipment_list = Equipment.query.filter_by(company_id=current_user.company_id).order_by(Equipment.name).all()
+    # Return a list of simple objects with id and name
+    return jsonify([{'id': eq.id, 'name': eq.name} for eq in equipment_list])
+
+@app.route('/api/technicians')
+@login_required
+def api_get_technicians():
+    # A "technician" is any non-admin user
+    technicians = User.query.join(Role).filter(
+        User.company_id == current_user.company_id,
+        Role.is_admin == False,
+        User.is_active == True
+    ).order_by(User.first_name).all()
+    # Return a list with id and full name
+    return jsonify([{'id': tech.id, 'name': f"{tech.first_name} {tech.last_name}"} for tech in technicians])
+
+@app.route('/api/teams')
+@login_required
+def api_get_teams():
+    teams = Team.query.filter_by(company_id=current_user.company_id, is_active=True).order_by(Team.name).all()
+    return jsonify([{'id': team.id, 'name': team.name} for team in teams])
 
 # --- DATA API ROUTES ---
 
@@ -2323,6 +2793,679 @@ def delete_vendor(vendor_id):
     flash(f'Vendor "{vendor.name}" has been deleted.', 'success')
     return redirect(url_for('manage_vendors'))
 
+@app.route('/vendors/<int:vendor_id>/delete-media', methods=['POST'])
+@login_required
+@permission_required('CAN_MANAGE_VENDORS')
+def delete_vendor_media(vendor_id):
+    vendor = Vendor.query.get_or_404(vendor_id)
+    if vendor.company_id != current_user.company_id:
+        abort(403)
+        
+    filename = request.form.get('filename')
+    file_type_key = request.form.get('file_type')
+    
+    if not all([filename, file_type_key]):
+        flash('Missing file information for deletion.', 'danger')
+        return redirect(url_for('edit_vendor', vendor_id=vendor_id))
+
+    folder_map = {'images': 'images', 'videos': 'videos', 'audio_files': 'audio', 'documents': 'documents'}
+    folder_name = folder_map.get(file_type_key)
+
+    if not folder_name:
+        flash('Invalid file type specified.', 'danger')
+        return redirect(url_for('edit_vendor', vendor_id=vendor_id))
+
+    current_files = getattr(vendor, file_type_key, [])
+    
+    if filename in current_files:
+        try:
+            # Delete physical file from the 'vendors' upload folder
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'vendors', folder_name, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                
+            # Remove from database list
+            current_files.remove(filename)
+            setattr(vendor, file_type_key, current_files or None)
+            
+            flag_modified(vendor, file_type_key)
+            db.session.commit()
+            
+            flash(f'File "{filename.split("_")[-1]}" deleted successfully.', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f"An error occurred while deleting the file: {e}", 'danger')
+    else:
+        flash('File not found for this vendor.', 'warning')
+        
+    return redirect(url_for('edit_vendor', vendor_id=vendor_id))
+
+    
+# --- TEAM MANAGEMENT ROUTES ---
+
+def get_team_form_data():
+    """Helper to fetch data for the team form."""
+    # Fetch all non-admin users for the current company to be added as members
+    return {
+        'all_users': User.query.join(Role).filter(
+            User.company_id == current_user.company_id,
+            Role.is_admin == False
+        ).order_by(User.first_name).all()
+    }
+
+@app.route('/teams')
+@login_required
+@permission_required('CAN_MANAGE_TEAMS')
+def manage_teams():
+    search_query = request.args.get('q', '').strip()
+    
+    # Base query to get teams and count their members
+    query = db.session.query(
+        Team,
+        func.count(team_members.c.user_id).label('member_count')
+    ).outerjoin(team_members).group_by(Team.id)
+    
+    # Filter by the current user's company
+    query = query.filter(Team.company_id == current_user.company_id)
+
+    if search_query:
+        query = query.filter(Team.name.ilike(f'%{search_query}%'))
+
+    teams_with_counts = query.order_by(Team.name).all()
+    
+    return render_template(
+        'teams/index.html',
+        teams_with_counts=teams_with_counts,
+        search_query=search_query
+    )
+
+@app.route('/teams/add', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_MANAGE_TEAMS')
+def add_team():
+    if request.method == 'POST':
+        name = request.form.get('name')
+        if not name:
+            flash('Team Name is a required field.', 'danger')
+            return render_template('teams/form.html', form_data=get_team_form_data(), team=None)
+
+        # Check for duplicate team name
+        if Team.query.filter_by(company_id=current_user.company_id, name=name).first():
+            flash(f'A team with the name "{name}" already exists.', 'warning')
+            return render_template('teams/form.html', form_data=get_team_form_data(), team=None)
+
+        new_team = Team(
+            company_id=current_user.company_id,
+            name=name,
+            description=request.form.get('description'),
+            is_active=True # Default to active
+        )
+        
+        # Find and associate selected members
+        member_ids = request.form.getlist('member_ids')
+        if member_ids:
+            # Query for the User objects and assign them to the relationship
+            members = User.query.filter(User.id.in_(member_ids)).all()
+            new_team.members = members
+        
+        db.session.add(new_team)
+        db.session.commit()
+        
+        flash(f'Team "{new_team.name}" created successfully.', 'success')
+        return redirect(url_for('manage_teams'))
+
+    return render_template('teams/form.html', form_data=get_team_form_data(), team=None)
+
+@app.route('/teams/edit/<int:team_id>', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_MANAGE_TEAMS')
+def edit_team(team_id):
+    # Eagerly load the members to have them available for the form
+    team = Team.query.options(joinedload(Team.members)).get_or_404(team_id)
+    
+    # Security check
+    if team.company_id != current_user.company_id:
+        abort(403)
+
+    if request.method == 'POST':
+        name = request.form.get('name')
+        if not name:
+            flash('Team Name is a required field.', 'danger')
+            # Re-render form with errors
+            return render_template('teams/form.html', form_data=get_team_form_data(), team=team)
+
+        # Check for duplicate name, excluding the current team itself
+        existing_team = Team.query.filter(
+            Team.company_id == current_user.company_id,
+            Team.name == name,
+            Team.id != team_id
+        ).first()
+        if existing_team:
+            flash(f'Another team with the name "{name}" already exists.', 'warning')
+            return render_template('teams/form.html', form_data=get_team_form_data(), team=team)
+
+        # Update basic details
+        team.name = name
+        team.description = request.form.get('description')
+        
+        # --- Sync Members ---
+        # Get the list of user IDs submitted from the form's checkboxes
+        submitted_member_ids = request.form.getlist('member_ids')
+        
+        # Find the full User objects for the submitted IDs
+        # We add a company_id check here as a security measure
+        selected_members = User.query.filter(
+            User.company_id == current_user.company_id,
+            User.id.in_(submitted_member_ids)
+        ).all()
+        
+        # SQLAlchemy is smart: assigning a new list to the relationship
+        # will automatically handle adding new members and removing old ones.
+        team.members = selected_members
+        
+        db.session.commit()
+        flash(f'Team "{team.name}" updated successfully.', 'success')
+        return redirect(url_for('manage_teams'))
+
+    # For a GET request, render the form pre-filled with the team's data
+    return render_template('teams/form.html', form_data=get_team_form_data(), team=team)
+
+@app.route('/teams/view/<int:team_id>')
+@login_required
+@permission_required('CAN_MANAGE_TEAMS')
+def view_team(team_id):
+    # Eagerly load the members for display
+    team = Team.query.options(joinedload(Team.members)).get_or_404(team_id)
+    
+    # Security check
+    if team.company_id != current_user.company_id:
+        abort(403)
+        
+    return render_template('teams/view.html', team=team)
+
+@app.route('/teams/delete/<int:team_id>', methods=['POST'])
+@login_required
+@permission_required('CAN_MANAGE_TEAMS')
+def delete_team(team_id):
+    team = Team.query.get_or_404(team_id)
+    
+    # Security check
+    if team.company_id != current_user.company_id:
+        abort(403)
+        
+    # Future-proofing: Check if the team is assigned to any open work orders before deleting
+    # if team.work_orders:
+    #     flash(f'Cannot delete team "{team.name}" as it is assigned to active work orders.', 'danger')
+    #     return redirect(url_for('manage_teams'))
+        
+    try:
+        # SQLAlchemy will automatically handle deleting entries from the
+        # `team_members` association table because of the relationship setup.
+        db.session.delete(team)
+        db.session.commit()
+        flash(f'Team "{team.name}" has been deleted successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'An error occurred while deleting the team: {e}', 'danger')
+
+    return redirect(url_for('manage_teams'))
+
+# --- WORK ORDER ROUTES ---
+
+def get_work_order_form_data():
+    """Helper to fetch data for the work order form dropdowns."""
+    company_id = current_user.company_id
+    # Fetch all non-admin users to be potential technicians
+    technicians = User.query.join(Role).filter(
+        User.company_id == company_id,
+        Role.is_admin == False,
+        User.is_active == True
+    ).order_by(User.first_name).all()
+
+    return {
+        'equipment': Equipment.query.filter_by(company_id=company_id).order_by(Equipment.name).all(),
+        'locations': Location.query.filter_by(company_id=company_id, is_active=True).order_by(Location.name).all(),
+        'technicians': technicians,
+        'teams': Team.query.filter_by(company_id=company_id, is_active=True).order_by(Team.name).all(),
+    }
+
+@app.route('/work-orders')
+@login_required
+@permission_required('CAN_CREATE_WORK_ORDER') # Base permission needed to see the page
+def manage_work_orders():
+    search_query = request.args.get('q', '').strip()
+    # --- Determine user's permissions ---
+    can_manage_all = current_user.role.is_admin or 'CAN_MANAGE_ALL_WORK_ORDERS' in [p.name for p in current_user.role.permissions]
+    can_approve = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in [p.name for p in current_user.role.permissions]
+
+    # --- Base Query ---
+    # Eagerly load all related data needed for the table
+    base_query = WorkOrder.query.options(
+        joinedload(WorkOrder.equipment),
+        joinedload(WorkOrder.location),
+        joinedload(WorkOrder.assigned_user),
+        joinedload(WorkOrder.assigned_team)
+    ).filter(WorkOrder.company_id == current_user.company_id)
+
+    # --- Filter based on role ---
+    if can_manage_all:
+        work_orders_query = base_query
+    else:
+        # A user can see work orders they created, are assigned to, or are on a team they are a member of.
+        user_team_ids = [team.id for team in current_user.teams]
+        work_orders_query = base_query.filter(
+            db.or_(
+                WorkOrder.created_by_id == current_user.id,
+                WorkOrder.assigned_to_user_id == current_user.id,
+                WorkOrder.assigned_to_team_id.in_(user_team_ids)
+            )
+        )
+
+    # --- Handle Search ---
+    if search_query:
+        search_term = f"%{search_query}%"
+        work_orders_query = work_orders_query.filter(
+            db.or_(
+                WorkOrder.title.ilike(search_term),
+                WorkOrder.id.ilike(search_term), # Search by WO number
+                Equipment.name.ilike(search_term) # Search by equipment name
+            )
+        )
+
+    # --- Fetch "Requests" (On Hold work orders) if user has permission ---
+    requests_query = None
+    if can_approve:
+        requests_query = base_query.filter(WorkOrder.status == 'On Hold').order_by(WorkOrder.created_at.desc()).all()
+
+    # Get the final list of "approved" work orders
+    work_orders = work_orders_query.filter(
+        ~WorkOrder.status.in_(['On Hold', 'Rejected'])
+    ).order_by(WorkOrder.created_at.desc()).all()
+
+    return render_template(
+        'work_orders/index.html',
+        work_orders=work_orders,
+        work_order_requests=requests_query,
+        can_approve=can_approve,
+        search_query=search_query
+    )
+    
+@app.route('/work-orders/view/<int:wo_id>')
+@login_required
+@permission_required('CAN_CREATE_WORK_ORDER') # A base permission to access any WO page
+def view_work_order(wo_id):
+    # Eagerly load all relationships needed for the view page in one go
+    # This is highly efficient and prevents multiple database queries.
+    work_order = WorkOrder.query.options(
+        joinedload(WorkOrder.equipment).joinedload(Equipment.location),
+        joinedload(WorkOrder.equipment).joinedload(Equipment.category),
+        joinedload(WorkOrder.location),
+        joinedload(WorkOrder.created_by).joinedload(User.role),
+        joinedload(WorkOrder.assigned_user),
+        joinedload(WorkOrder.assigned_team)
+    ).get_or_404(wo_id)
+
+    # --- Security & Permission Checks ---
+    # 1. Ensure the Work Order belongs to the user's company
+    if work_order.company_id != current_user.company_id:
+        abort(403)
+
+    # 2. Determine if the current user has permission to view this specific WO
+    can_manage_all = current_user.role.is_admin or 'CAN_MANAGE_ALL_WORK_ORDERS' in [p.name for p in current_user.role.permissions]
+    user_team_ids = [team.id for team in current_user.teams]
+
+    # A user can view this WO if:
+    # - They have permission to manage ALL work orders, OR
+    # - They are the one who created it, OR
+    # - It is directly assigned to them, OR
+    # - It is assigned to a team they are a member of.
+    can_view = (
+        can_manage_all or
+        work_order.created_by_id == current_user.id or
+        work_order.assigned_to_user_id == current_user.id or
+        (work_order.assigned_to_team_id and work_order.assigned_to_team_id in user_team_ids)
+    )
+    
+    if not can_view:
+        # If none of the conditions are met, the user is forbidden from seeing this page.
+        abort(403)
+
+    return render_template('work_orders/view.html', wo=work_order)
+    
+@app.route('/work-orders/add', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_CREATE_WORK_ORDER')
+def add_work_order():
+    if request.method == 'POST':
+        # --- 1. Validation ---
+        if not all([request.form.get('title'), request.form.get('equipment_id'), request.form.get('work_order_type')]):
+            flash('Title, Equipment, and Type are required fields.', 'danger')
+            return render_template('work_orders/form.html', form_data=get_work_order_form_data(), wo=None)
+
+        # --- 2. Determine Approval Status based on User Role ---
+        can_auto_approve = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in [p.name for p in current_user.role.permissions]
+        status = 'Open' if can_auto_approve else 'On Hold'
+        is_approved = can_auto_approve
+
+        # --- 3. Create Work Order Object ---
+        new_wo = WorkOrder(
+            company_id=current_user.company_id,
+            title=request.form.get('title'),
+            priority=request.form.get('priority'),
+            equipment_id=request.form.get('equipment_id'),
+            location_id=request.form.get('location_id') or None,
+            work_order_type=request.form.get('work_order_type'),
+            description=request.form.get('description'),
+            assigned_to_user_id=request.form.get('assigned_to_user_id') or None,
+            assigned_to_team_id=request.form.get('assigned_to_team_id') or None,
+            scheduled_date=request.form.get('scheduled_date') or None,
+            due_date=request.form.get('due_date') or None,
+            estimated_duration=request.form.get('estimated_duration') or None,
+            created_by_id=current_user.id,
+            status=status,
+            is_approved=is_approved
+        )
+        
+        db.session.add(new_wo)
+        save_actions = []
+
+        try:
+            db.session.flush() # Get the new_wo.id for file naming
+            # --- 4. Handle Media Uploads (using our generic helper) ---
+            saved_files, save_actions = process_uploads(new_wo, request.files, 'work_orders')
+            new_wo.images = saved_files['images'] or None
+            new_wo.videos = saved_files['videos'] or None
+            new_wo.audio_files = saved_files['audio_files'] or None
+            new_wo.documents = saved_files['documents'] or None
+            
+            # --- 5. Commit and Save ---
+            db.session.commit()
+            for file, path in save_actions:
+                file.save(path)
+
+            if can_auto_approve:
+                # If auto-approved and assigned, send notification email
+                if new_wo.assigned_to_user_id or new_wo.assigned_to_team_id:
+                    send_work_order_assignment_email(new_wo)
+                flash(f'Work Order #{new_wo.id} created successfully.', 'success')
+            else:
+                flash(f'Work Order request #{new_wo.id} submitted for approval.', 'info')
+                send_approval_request_email(new_wo)
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'An error occurred: {e}', 'danger')
+            
+        return redirect(url_for('manage_work_orders'))
+    
+    return render_template('work_orders/form.html', form_data=get_work_order_form_data(), wo=None)
+
+@app.route('/work-orders/edit/<int:wo_id>', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_EDIT_WORK_ORDER') # Base permission
+def edit_work_order(wo_id):
+    wo = WorkOrder.query.get_or_404(wo_id)
+    
+    # --- Security & Permission Checks ---
+    if wo.company_id != current_user.company_id:
+        abort(403)
+    
+    can_manage = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in [p.name for p in current_user.role.permissions]
+    is_creator = wo.created_by_id == current_user.id
+
+    if not can_manage and not is_creator:
+        flash('You do not have permission to edit this work order.', 'danger')
+        return redirect(url_for('manage_work_orders'))
+
+    if request.method == 'POST':
+        save_actions = []
+        try:
+            # --- Update Fields ---
+            wo.title = request.form.get('title')
+            wo.priority = request.form.get('priority')
+            # ... (update all other fields from the form) ...
+            wo.equipment_id = request.form.get('equipment_id')
+            wo.location_id = request.form.get('location_id') or None
+            wo.work_order_type = request.form.get('work_order_type')
+            wo.description = request.form.get('description')
+            wo.assigned_to_user_id = request.form.get('assigned_to_user_id') or None
+            wo.assigned_to_team_id = request.form.get('assigned_to_team_id') or None
+            wo.scheduled_date = request.form.get('scheduled_date') or None
+            wo.due_date = request.form.get('due_date') or None
+            wo.estimated_duration = request.form.get('estimated_duration') or None
+            
+            # --- RE-APPROVAL LOGIC ---
+            # If the user is NOT a manager/admin, any edit reverts the status to 'On Hold'
+            if not can_manage:
+                wo.status = 'On Hold'
+                wo.is_approved = False
+                flash('Your changes have been submitted for re-approval.', 'info')
+                # Send a notification to the approvers
+                send_approval_request_email(wo)
+            
+            # --- Handle Media Uploads ---
+            # This logic for appending and flagging is from your equipment edit route
+            saved_files, save_actions = process_uploads(wo, request.files, 'work_orders')
+            if saved_files['images']: wo.images = (wo.images or []) + saved_files['images']
+            if saved_files['videos']: wo.videos = (wo.videos or []) + saved_files['videos']
+            if saved_files['audio_files']: wo.audio_files = (wo.audio_files or []) + saved_files['audio_files']
+            if saved_files['documents']: wo.documents = (wo.documents or []) + saved_files['documents']
+            flag_modified(wo, "images"); flag_modified(wo, "videos");
+            flag_modified(wo, "audio_files"); flag_modified(wo, "documents");
+
+            # --- Commit and Save ---
+            db.session.commit()
+            for file, path in save_actions:
+                file.save(path)
+                
+            flash(f'Work Order #{wo.id} updated successfully.', 'success')
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'An error occurred: {e}', 'danger')
+            
+        return redirect(url_for('manage_work_orders'))
+
+    # For a GET request, reuse the add form template, passing the existing WO data
+    return render_template('work_orders/form.html', form_data=get_work_order_form_data(), wo=wo)
+
+@app.route('/work-orders/approve/<int:wo_id>', methods=['POST'])
+@login_required
+@permission_required('CAN_APPROVE_WORK_ORDER')
+def approve_work_order(wo_id):
+    work_order = WorkOrder.query.get_or_404(wo_id)
+    if work_order.company_id != current_user.company_id or work_order.status != 'On Hold':
+        abort(403) # Prevent approving already approved/completed WOs
+
+    # --- Update Status ---
+    work_order.status = 'Open'
+    work_order.is_approved = True
+    db.session.commit()
+
+    # --- Send Notifications ---
+    send_wo_status_change_email(work_order, is_approved=True)
+    # If it was assigned during creation, notify the technician/team now
+    if work_order.assigned_to_user_id or work_order.assigned_to_team_id:
+        send_work_order_assignment_email(work_order)
+
+    flash(f'Work Order #{work_order.id} has been approved and is now Open.', 'success')
+    return redirect(url_for('manage_work_orders'))
+
+
+@app.route('/work-orders/reject/<int:wo_id>', methods=['POST'])
+@login_required
+@permission_required('CAN_APPROVE_WORK_ORDER')
+def reject_work_order(wo_id):
+    # Eagerly load the created_by relationship so we can access it after deletion
+    work_order = WorkOrder.query.options(joinedload(WorkOrder.created_by)).get_or_404(wo_id)
+
+    # Security checks
+    if work_order.company_id != current_user.company_id or work_order.status != 'On Hold':
+        abort(403)
+
+    rejection_reason = request.form.get('rejection_reason')
+    if not rejection_reason:
+        flash('A reason is required to reject and delete a work order request.', 'danger')
+        return redirect(url_for('manage_work_orders'))
+
+    try:
+        # --- Step 1: Prepare Notification Data BEFORE Deleting ---
+        # The work_order object will be expired after the commit, so we
+        # store its details in a temporary object for the email function.
+        class TempWOInfo:
+            def __init__(self, wo, reason):
+                self.id = wo.id
+                self.title = wo.title
+                self.created_by = wo.created_by
+                self.rejection_reason = reason
+        
+        notification_data = TempWOInfo(work_order, rejection_reason)
+
+        # --- Step 2: Delete Files and Database Record ---
+        delete_all_uploads(work_order, 'work_orders')
+        db.session.delete(work_order)
+        db.session.commit()
+
+        # --- Step 3: Send Notification AFTER Successful Deletion ---
+        send_wo_status_change_email(notification_data, is_approved=False)
+
+        flash(f'Work Order request #{notification_data.id} has been rejected and deleted.', 'success')
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'An error occurred while rejecting the work order: {e}', 'danger')
+        print(f"Error in reject_work_order: {e}") # For debugging
+
+    return redirect(url_for('manage_work_orders'))
+
+    
+@app.route('/work-orders/update-status/<int:wo_id>', methods=['POST'])
+@login_required
+# We'll use a more general permission here, but you could create a specific one
+@permission_required('CAN_EDIT_WORK_ORDER') 
+def update_work_order_status(wo_id):
+    work_order = WorkOrder.query.get_or_404(wo_id)
+    if work_order.company_id != current_user.company_id:
+        abort(403)
+        
+    new_status = request.json.get('status')
+    valid_statuses = ['Open', 'In Progress', 'On Hold', 'Completed']
+    
+    if not new_status or new_status not in valid_statuses:
+        return jsonify({'error': 'Invalid status provided.'}), 400
+
+    try:
+        work_order.status = new_status
+        # If marking as completed, set the completion timestamp
+        if new_status == 'Completed':
+            work_order.completed_at = datetime.now(timezone.utc)
+        else:
+            work_order.completed_at = None # Clear timestamp if reopening
+
+        db.session.commit()
+        
+        # You could add email notification logic here if needed
+        
+        return jsonify({
+            'success': True, 
+            'new_status': new_status,
+            'message': f'Work Order status updated to "{new_status}".'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'An error occurred: {e}'}), 500
+    
+@app.route('/work-orders/delete/<int:wo_id>', methods=['POST'])
+@login_required
+def delete_work_order(wo_id):
+    work_order = WorkOrder.query.get_or_404(wo_id)
+    
+    # --- Security & Permission Checks ---
+    
+    # 1. Ensure the work order belongs to the user's company
+    if work_order.company_id != current_user.company_id:
+        abort(403)
+
+    # 2. Check if the user has permission to delete this specific work order
+    can_manage = current_user.role and (current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in [p.name for p in current_user.role.permissions])
+    is_creator = work_order.created_by_id == current_user.id
+
+    if not can_manage and not is_creator:
+        # If the user is neither a manager/admin nor the creator, forbid access.
+        abort(403)
+
+    # Note: As per your earlier rule, if a non-manager deletes, it should require re-approval.
+    # For a destructive action like deletion, we will treat it as final. If you want a
+    # "request deletion" workflow, that would require a different status and route.
+    
+    try:
+        wo_id_for_flash = work_order.id # Store ID for the flash message
+        
+        # Step 1: Delete associated media files using the generic helper
+        delete_all_uploads(work_order, 'work_orders')
+        
+        # Step 2: Delete the database record
+        # SQLAlchemy will handle removing associations from other tables (like team_members) automatically if configured.
+        db.session.delete(work_order)
+        db.session.commit()
+        
+        flash(f'Work Order #{wo_id_for_flash} and all associated media have been deleted.', 'success')
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'An error occurred while deleting the work order: {e}', 'danger')
+        print(f"Error in delete_work_order: {e}")
+
+    return redirect(url_for('manage_work_orders'))
+
+@app.route('/work-orders/<int:wo_id>/delete-media', methods=['POST'])
+@login_required
+@permission_required('CAN_EDIT_WORK_ORDER') # User needs permission to edit to delete media
+def delete_work_order_media(wo_id):
+    work_order = WorkOrder.query.get_or_404(wo_id)
+    if work_order.company_id != current_user.company_id:
+        abort(403)
+        
+    filename = request.form.get('filename')
+    file_type_key = request.form.get('file_type') # e.g., 'images', 'audio_files'
+    
+    if not all([filename, file_type_key]):
+        flash('Missing file information for deletion.', 'danger')
+        return redirect(url_for('edit_work_order', wo_id=wo_id))
+
+    # Map the model attribute name to the physical folder name
+    folder_map = {'images': 'images', 'videos': 'videos', 'audio_files': 'audio', 'documents': 'documents'}
+    folder_name = folder_map.get(file_type_key)
+
+    if not folder_name:
+        flash('Invalid file type specified.', 'danger')
+        return redirect(url_for('edit_work_order', wo_id=wo_id))
+
+    current_files = getattr(work_order, file_type_key, [])
+    
+    if filename in current_files:
+        try:
+            # --- Step 1: Delete the physical file ---
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'work_orders', folder_name, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                
+            # --- Step 2: Remove the filename from the database list ---
+            current_files.remove(filename)
+            setattr(work_order, file_type_key, current_files or None)
+            
+            flag_modified(work_order, file_type_key)
+            db.session.commit()
+            
+            flash(f'File "{filename.split("_")[-1]}" deleted successfully.', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f"An error occurred while deleting the file: {e}", 'danger')
+    else:
+        flash('File not found for this work order.', 'warning')
+        
+    return redirect(url_for('edit_work_order', wo_id=wo_id))
+
 # --- USER PROFILE ROUTE ---
 
 def get_profile_form_data():
@@ -2467,6 +3610,24 @@ def delete_user(user_id):
         else:
             # Redirect to user management page in the future
             return redirect(url_for('manage_users'))
+        
+# --- NOTIFICATION ROUTES ---
+
+@app.route('/notifications')
+@login_required
+def notification_logs():
+    # --- THIS IS THE FIX ---
+    # Filter the logs to get ONLY those belonging to the currently logged-in user.
+    logs = NotificationLog.query.filter_by(
+    user_id=current_user.id
+    ).order_by(NotificationLog.created_at.desc()).paginate(per_page=20)
+    
+    # You can also add logic here to mark these notifications as "read"
+    # For example:
+    # NotificationLog.query.filter_by(user_id=current_user.id, is_read=False).update({'is_read': True})
+    # db.session.commit()
+
+    return render_template('notifications/index.html', logs=logs)
 
 # --- SUPERADMIN ROUTES ---
 
@@ -2545,6 +3706,8 @@ def delete_company():
 
     return redirect(url_for('super_admin_dashboard'))
 
+# --- CLI CONFIGURATION ---
+
 @app.cli.command("init-db")
 def init_db():
     """Drops and recreates the database, then seeds a default company and admin user."""
@@ -2590,6 +3753,31 @@ def init_db():
 def delete_db():
     db.drop_all()
     print("Database tables deleted.")
+    
+@app.cli.command("cleanup-logs")
+def cleanup_logs():
+    """
+    Finds and deletes notification logs that are older than their
+    retention period. To be run by a scheduler (e.g., cron) once a day.
+    """
+    with app.app_context():
+        # --- Password credential logs (1 day retention) ---
+        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+        old_password_logs = NotificationLog.query.filter(
+            NotificationLog.category == 'credentials',
+            NotificationLog.created_at < one_day_ago
+        ).all()
+        
+        if old_password_logs:
+            print(f"Deleting {len(old_password_logs)} old credential notification(s)...")
+            for log in old_password_logs:
+                db.session.delete(log)
+
+        # You can add other cleanup logic here in the future
+        # e.g., deleting general notifications older than 30 days
+
+        db.session.commit()
+        print("Log cleanup complete.")
 
 if __name__ == '__main__':
     app.run(debug=True, port=8080)

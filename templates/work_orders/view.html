@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">{{ wo.title }}</h1>
+            <p class="text-muted mb-0">Work Order #<code>{{ wo.id }}</code></p>
+        </div>
+        <a href="{{ url_for('manage_work_orders') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Back to All Work Orders
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <!-- Status Management (Full Width at Top) -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="status-bar">
+                {% set statuses = [
+                    {'name': 'Open', 'icon': 'bi-play-circle', 'color': 'primary'},
+                    {'name': 'In Progress', 'icon': 'bi-arrow-repeat', 'color': 'warning'},
+                    {'name': 'On Hold', 'icon': 'bi-pause-circle', 'color': 'secondary'},
+                    {'name': 'Completed', 'icon': 'bi-check-circle', 'color': 'success'}
+                ] %}
+                {% for s in statuses %}
+                    <button type="button" class="status-btn {{ 'active' if wo.status == s.name }} status-{{ s.color }}" 
+                            data-status="{{ s.name }}" title="{{ s.name }}">
+                        <i class="{{ s.icon }}"></i>
+                        <span>{{ s.name }}</span>
+                    </button>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Two-Column Layout Below Status Bar -->
+    <div class="row">
+        <!-- Left Column (Work Order Details) -->
+        <div class="col-lg-7">
+            <!-- Work Order Details Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Work Order Details</h5></div>
+                <div class="card-body">
+                    <h6>Basic Information</h6><hr class="mt-1">
+                    <div class="row">
+                        <div class="col-md-6 mb-2"><strong>Work Order #:</strong> <code>{{ wo.id }}</code></div>
+                        <div class="col-md-6 mb-2"><strong>Title:</strong> {{ wo.title }}</div>
+                        <div class="col-md-6 mb-2"><strong>Type:</strong> {{ wo.work_order_type }}</div>
+                        <div class="col-md-6 mb-2"><strong>Priority:</strong> {{ wo.priority }}</div>
+                        <div class="col-md-6 mb-2"><strong>Created:</strong> {{ wo.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                    </div>
+                    <h6 class="mt-4">Assignment & Scheduling</h6><hr class="mt-1">
+                    <div class="row">
+                        <div class="col-md-6 mb-2"><strong>Created By:</strong> {{ wo.created_by.first_name }} {{ wo.created_by.last_name }}</div>
+                        <div class="col-md-6 mb-2"><strong>Assigned To:</strong> 
+                            {% if wo.assigned_user %}{{ wo.assigned_user.first_name }} {{ wo.assigned_user.last_name }}{% else %}Unassigned{% endif %}
+                        </div>
+                        <div class="col-md-6 mb-2"><strong>Assigned Team:</strong> 
+                             {% if wo.assigned_team %}{{ wo.assigned_team.name }}{% else %}N/A{% endif %}
+                        </div>
+                        <div class="col-md-6 mb-2"><strong>Scheduled:</strong> {{ wo.scheduled_date.strftime('%Y-%m-%d') if wo.scheduled_date else 'N/A' }}</div>
+                        <div class="col-md-6 mb-2"><strong>Due Date:</strong> {{ wo.due_date.strftime('%Y-%m-%d') if wo.due_date else 'N/A' }}</div>
+                        <div class="col-md-6 mb-2"><strong>Est. Duration:</strong> {{ wo.estimated_duration }} minutes</div>
+                    </div>
+                    <h6 class="mt-4">Description</h6><hr class="mt-1">
+                    <p>{{ wo.description or 'No description provided.' }}</p>
+                </div>
+            </div>
+            
+            <!-- Media Attachments Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Media Attachments</h5></div>
+                <div class="card-body">
+                    {% set media_types = [
+                        ('images', 'Images', wo.images),
+                        ('videos', 'Videos', wo.videos),
+                        ('audio', 'Audio Files', wo.audio_files),
+                        ('documents', 'Documents', wo.documents)
+                    ] %}
+                    
+                    {% if wo.images or wo.videos or wo.audio_files or wo.documents %}
+                        {% for folder, title, files in media_types %}
+                            {% if files %}
+                                <h6 class="mt-3">{{ title }}</h6>
+                                <div class="row gx-2 gy-2">
+                                    {% for filename in files %}
+                                    <div class="col-auto">
+                                        <div class="card h-100" style="width: 150px;">
+                                            <!-- Preview Section -->
+                                            <a href="{{ url_for('static', filename='uploads/work_orders/' + folder + '/' + filename) }}" target="_blank" class="text-center p-3">
+                                                {% if folder == 'images' %}
+                                                    <img src="{{ url_for('static', filename='uploads/work_orders/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Image preview" style="object-fit: cover; height: 80px;">
+                                                {% elif folder == 'videos' %}
+                                                    <i class="bi bi-film fs-1"></i>
+                                                {% elif folder == 'audio' %}
+                                                    <i class="bi bi-music-note-beamed fs-1"></i>
+                                                {% else %}
+                                                    <i class="bi bi-file-earmark-text fs-1"></i>
+                                                {% endif %}
+                                            </a>
+                                            <!-- Card Body with Filename -->
+                                            <div class="card-body p-2 text-center">
+                                                <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">
+                                                    <a href="{{ url_for('static', filename='uploads/work_orders/' + folder + '/' + filename) }}" target="_blank" class="text-decoration-none">
+                                                        {{ filename.split('_')[-1] }}
+                                                    </a>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">No media has been uploaded for this work order.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column (Equipment and Actions) -->
+        <div class="col-lg-5">
+            <!-- Equipment Card -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Equipment</h5>
+                    <a href="{{ url_for('view_equipment', equip_id=wo.equipment.id) if wo.equipment else '#' }}" class="btn btn-sm btn-outline-primary">View Equipment Page</a>
+                </div>
+                <div class="card-body">
+                    {% if wo.equipment %}
+                    <div class="row">
+                        <div class="col-md-6 mb-2"><strong>Name:</strong> {{ wo.equipment.name }} (<code>{{ wo.equipment.equipment_id }}</code>)</div>
+                        <div class="col-md-6 mb-2"><strong>Location:</strong> {{ wo.equipment.location.name if wo.equipment.location else 'N/A' }}</div>
+                        <div class="col-md-6 mb-2"><strong>Category:</strong> {{ wo.equipment.category.name if wo.equipment.category else 'N/A' }}</div>
+                        <div class="col-md-6 mb-2"><strong>Criticality:</strong> {{ wo.equipment.criticality or 'N/A' }}</div>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No equipment associated.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
+                <div class="list-group list-group-flush">
+                    {% set can_manage = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in (current_user.role.permissions | map(attribute='name')) %}
+                    {% set is_creator = wo.created_by_id == current_user.id %}
+                    
+                    {% if can_manage or is_creator %}
+                        <a href="{{ url_for('edit_work_order', wo_id=wo.id) }}" class="list-group-item list-group-item-action"></i>Edit Work Order</a>
+                        <a href="{{ url_for('delete_work_order', wo_id=wo.id) }}" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal"><i class="bi bi-trash me-2"></i>Delete Work Order</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deleteModalLabel">Confirm Deletion</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Are you sure you want to permanently delete Work Order <strong>#{{ wo.id }} ({{ wo.title }})</strong>? This action cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form action="{{ url_for('delete_work_order', wo_id=wo.id) }}" method="POST">
+            <button type="submit" class="btn btn-danger">Yes, Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const statusBar = document.querySelector('.status-bar');
+    if (statusBar) {
+        statusBar.addEventListener('click', function(event) {
+            const clickedButton = event.target.closest('.status-btn');
+            if (!clickedButton || clickedButton.classList.contains('active')) {
+                return;
+            }
+            const newStatus = clickedButton.dataset.status;
+            const workOrderId = {{ wo.id }};
+            const url = `/work-orders/update-status/${workOrderId}`;
+            const allButtons = statusBar.querySelectorAll('.status-btn');
+            allButtons.forEach(btn => btn.disabled = true);
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const oldActiveButton = statusBar.querySelector('.status-btn.active');
+                    if (oldActiveButton) oldActiveButton.classList.remove('active');
+                    clickedButton.classList.add('active');
+                    // Simple page reload to reflect all changes (like 'last updated' time)
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Fetch error:', error);
+                alert('A network error occurred. Please try again.');
+            })
+            .finally(() => {
+                allButtons.forEach(btn => btn.disabled = false);
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

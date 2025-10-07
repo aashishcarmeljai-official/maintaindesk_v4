@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">{% if wo %}Edit Work Order #{{ wo.id }}{% else %}Create New Work Order{% endif %}</h1>
+            <p class="text-muted mb-0">Fill out the details below to manage a maintenance task.</p>
+        </div>
+        <a href="{{ url_for('manage_work_orders') }}" class="btn btn-secondary">
+            <i class="bi bi-x-lg"></i> Cancel
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <form id="woForm" method="POST" action="{{ url_for('add_work_order') if not wo else url_for('edit_work_order', wo_id=wo.id) }}" enctype="multipart/form-data">
+        <div class="row">
+            <!-- Left Main Column -->
+            <div class="col-lg-8">
+                <!-- Main Details Card -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="title" class="form-label">Title <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="title" name="title" value="{{ wo.title or '' }}" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="equipment_id" class="form-label">Equipment <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <select id="equipment_id" name="equipment_id" required>
+                                        <option value="">Select equipment...</option>
+                                        {% for eq in form_data.equipment %}<option value="{{ eq.id }}" {% if wo and wo.equipment_id == eq.id %}selected{% endif %}>{{ eq.name }}</option>{% endfor %}
+                                    </select>
+                                    <a href="{{ url_for('add_equipment') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Equipment"><i class="bi bi-plus"></i></a>
+                                    <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="equipment" data-api-url="{{ url_for('api_get_equipment') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="location_id" class="form-label">Location</label>
+                                <div class="input-group">
+                                    <select id="location_id" name="location_id">
+                                        <option value="">Select location...</option>
+                                        {% for loc in form_data.locations %}<option value="{{ loc.id }}" {% if wo and wo.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>{% endfor %}
+                                    </select>
+                                    <a href="{{ url_for('add_location') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Location"><i class="bi bi-plus"></i></a>
+                                    <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="location" data-api-url="{{ url_for('api_get_locations') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                         <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control" id="description" name="description" rows="5">{{ wo.description or '' }}</textarea>
+                        </div>
+                    </div>
+                </div>
+                <!-- Media Card -->
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="mb-0">Media Attachments</h5></div>
+                    <div class="card-body">
+                        <h6 class="mt-4">Add New Media</h6>
+                        <p class="text-muted small">Upload or capture relevant photos, videos, or documents.</p>
+                        <div class="mb-3"><label for="images" class="form-label">Images</label><div class="input-group"><input class="form-control" type="file" id="images" name="images" multiple accept="image/*"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="image"><i class="bi bi-camera-fill me-1"></i> Capture</button></div><div class="row gx-2 gy-2 mt-2" id="images-preview"></div></div>
+                        <div class="mb-3"><label for="videos" class="form-label">Videos</label><div class="input-group"><input class="form-control" type="file" id="videos" name="videos" multiple accept="video/*"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="video"><i class="bi bi-camera-reels-fill me-1"></i> Record</button></div><div class="row gx-2 gy-2 mt-2" id="videos-preview"></div></div>
+                        <div class="mb-3"><label for="audio_files" class="form-label">Audio Notes</label><div class="input-group"><input class="form-control" type="file" id="audio_files" name="audio_files" multiple accept="audio/*"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="audio"><i class="bi bi-mic-fill me-1"></i> Record</button></div><div class="row gx-2 gy-2 mt-2" id="audio_files-preview"></div></div>
+                        <div class="mb-3"><label for="documents" class="form-label">Documents</label><input class="form-control" type="file" id="documents" name="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"><div class="row gx-2 gy-2 mt-2" id="documents-preview"></div></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Right Sidebar Column -->
+            <div class="col-lg-4">
+                <!-- Properties Card -->
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="mb-0">Properties</h5></div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="priority" class="form-label">Priority</label>
+                            <select class="form-select" id="priority" name="priority">
+                                {% set priorities = ['Low', 'Medium', 'High', 'Urgent'] %}
+                                {% for p in priorities %}<option value="{{ p }}" {% if (wo and wo.priority == p) or (not wo and p == 'Medium') %}selected{% endif %}>{{ p }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="work_order_type" class="form-label">Type <span class="text-danger">*</span></label>
+                            <select class="form-select" id="work_order_type" name="work_order_type" required>
+                                <option value="" disabled {% if not wo %}selected{% endif %}>-- Select Type --</option>
+                                {% set wo_types = ['Corrective', 'Preventive', 'Emergency'] %}
+                                {% for t in wo_types %}<option value="{{ t }}" {% if wo and wo.work_order_type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <!-- Assignment Card -->
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="mb-0">Assignment</h5></div>
+                    <div class="card-body">
+                         <div class="mb-3">
+                            <label for="assigned_to_user_id" class="form-label">Assign to Technician</label>
+                            <div class="input-group">
+                                <select id="assigned_to_user_id" name="assigned_to_user_id">
+                                    <option value="">Unassigned</option>
+                                    {% for tech in form_data.technicians %}<option value="{{ tech.id }}" {% if wo and wo.assigned_to_user_id == tech.id %}selected{% endif %}>{{ tech.first_name }} {{tech.last_name}}</option>{% endfor %}
+                                </select>
+                                <a href="{{ url_for('add_user') }}" target="_blank" class="btn btn-outline-secondary" title="Add New User"><i class="bi bi-plus"></i></a>
+                                <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="technician" data-api-url="{{ url_for('api_get_technicians') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="assigned_to_team_id" class="form-label">Assign to Team</label>
+                             <div class="input-group">
+                                <select id="assigned_to_team_id" name="assigned_to_team_id">
+                                    <option value="">Unassigned</option>
+                                    {% for team in form_data.teams %}<option value="{{ team.id }}" {% if wo and wo.assigned_to_team_id == team.id %}selected{% endif %}>{{ team.name }}</option>{% endfor %}
+                                </select>
+                                <a href="{{ url_for('add_team') }}" target="_blank" class="btn btn-outline-secondary" title="Add New Team"><i class="bi bi-plus"></i></a>
+                                <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="team" data-api-url="{{ url_for('api_get_teams') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                 <!-- Scheduling Card -->
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="mb-0">Scheduling</h5></div>
+                    <div class="card-body">
+                        <div class="mb-3"><label for="scheduled_date" class="form-label">Scheduled Date</label><input type="date" class="form-control" id="scheduled_date" name="scheduled_date" value="{{ wo.scheduled_date.strftime('%Y-%m-%d') if wo and wo.scheduled_date }}"></div>
+                        <div class="mb-3"><label for="due_date" class="form-label">Due Date</label><input type="date" class="form-control" id="due_date" name="due_date" value="{{ wo.due_date.strftime('%Y-%m-%d') if wo and wo.due_date }}"></div>
+                        <div class="mb-3"><label for="estimated_duration" class="form-label">Estimated Duration (minutes)</label><input type="number" class="form-control" id="estimated_duration" name="estimated_duration" value="{{ wo.estimated_duration or '' }}"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Existing Media (only on edit) -->
+        {% if wo %}
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Existing Media</h5></div>
+            <div class="card-body">
+                {% set media_types = [
+                    ('images', 'Images', wo.images),
+                    ('videos', 'Videos', wo.videos),
+                    ('audio', 'Audio Files', wo.audio_files),
+                    ('documents', 'Documents', wo.documents)
+                ] %}
+                
+                {% set ns = namespace(has_media=false) %}
+                {% for folder, title, files in media_types %}
+                    {% if files %}
+                        {% set ns.has_media = true %}
+                        <h6 class="mt-3">{{ title }}</h6>
+                        <div class="row gx-2 gy-2">
+                            {% for filename in files %}
+                            <div class="col-auto">
+                                <div class="card h-100" style="width: 150px;">
+                                    <a href="{{ url_for('static', filename='uploads/work_orders/' + folder + '/' + filename) }}" target="_blank" class="text-center p-3">
+                                        {% if folder == 'images' %}<img src="{{ url_for('static', filename='uploads/work_orders/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Preview">
+                                        {% elif folder == 'videos' %}<i class="bi bi-film fs-1"></i>
+                                        {% elif folder == 'audio' %}<i class="bi bi-music-note-beamed fs-1"></i>
+                                        {% else %}<i class="bi bi-file-earmark-text fs-1"></i>
+                                        {% endif %}
+                                    </a>
+                                    <div class="card-body p-2 text-center">
+                                        <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p>
+                                    </div>
+                                    <div class="card-footer p-1">
+                                        <form id="delete-form-{{ filename | replace('.', '_') }}" action="{{ url_for('delete_work_order_media', wo_id=wo.id) }}" method="POST">
+                                            <input type="hidden" name="filename" value="{{ filename }}">
+                                            <input type="hidden" name="file_type" value="{{ 'audio_files' if folder == 'audio' else folder }}">
+                                            <button type="button" class="btn btn-sm btn-danger w-100 existing-media-delete-btn">
+                                                <i class="bi bi-trash"></i> Delete
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if not ns.has_media %}
+                    <p class="text-muted">No media has been uploaded for this work order.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="text-end mt-2">
+            <a href="{{ url_for('manage_work_orders') }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary" form="woForm">{% if wo %}Save Changes{% else %}Submit Work Order{% endif %}</button>
+        </div>
+    </form>
+</div>
+
+{% include 'partials/_capture_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+    {% include 'partials/_form_scripts.html' %}
+{% endblock %}

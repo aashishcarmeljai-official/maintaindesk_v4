@@ -3,6 +3,8 @@ from flask_login import UserMixin
 from flask_bcrypt import Bcrypt
 from datetime import datetime, timezone
 from sqlalchemy.dialects.postgresql import JSONB
+from flask import current_app
+from itsdangerous import URLSafeTimedSerializer as Serializer
 
 db = SQLAlchemy()
 bcrypt = Bcrypt()
@@ -66,6 +68,22 @@ class User(UserMixin, db.Model):
     password_reset_required = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    def get_reset_token(self, expires_sec=1800):
+        """Generates a secure, timed token for password reset."""
+        s = Serializer(current_app.config['SECRET_KEY'])
+        return s.dumps({'user_id': self.id})
+
+    @staticmethod
+    def verify_reset_token(token, expires_sec=1800):
+        """Verifies a password reset token and returns the user if valid."""
+        s = Serializer(current_app.config['SECRET_KEY'])
+        try:
+            data = s.loads(token, max_age=expires_sec)
+            user_id = data.get('user_id')
+        except:
+            return None
+        return User.query.get(user_id)
 
     def set_password(self, password):
         self.password_hash = bcrypt.generate_password_hash(password).decode('utf-8')
@@ -272,3 +290,80 @@ class VendorContact(db.Model):
     email = db.Column(db.String(120))
     phone = db.Column(db.String(50))
     position = db.Column(db.String(100))
+    
+team_members = db.Table('team_members',
+    db.Column('team_id', db.Integer, db.ForeignKey('teams.id'), primary_key=True),
+    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True)
+)
+
+class Team(db.Model):
+    """Represents a team of users."""
+    __tablename__ = 'teams'
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    company = db.relationship('Company', backref=db.backref('teams', lazy=True))
+    members = db.relationship('User', secondary=team_members, lazy='subquery',
+                              backref=db.backref('teams', lazy=True))
+    
+class NotificationLog(db.Model):
+    """Stores a log of flash messages shown to users."""
+    __tablename__ = 'notification_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+
+    user = db.relationship('User', backref=db.backref('notifications', lazy=True, cascade="all, delete-orphan"))
+    
+class WorkOrder(db.Model):
+    """Represents a work order."""
+    __tablename__ = 'work_orders'
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    
+    # Core Details
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text)
+    priority = db.Column(db.String(50), default='Medium') # Low, Medium, High, Urgent
+    status = db.Column(db.String(50), default='Open', nullable=False) # On Hold, Open, In Progress, Completed, Rejected
+    work_order_type = db.Column(db.String(50)) # Corrective, Preventive, Emergency
+    
+    # Dates
+    scheduled_date = db.Column(db.DateTime)
+    due_date = db.Column(db.DateTime)
+    estimated_duration = db.Column(db.Integer) # in minutes
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = db.Column(db.DateTime)
+
+    # Relationships
+    equipment_id = db.Column(db.Integer, db.ForeignKey('equipment.id'), nullable=False)
+    location_id = db.Column(db.Integer, db.ForeignKey('locations.id'))
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    assigned_to_user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    assigned_to_team_id = db.Column(db.Integer, db.ForeignKey('teams.id'))
+    
+    # For approval workflow
+    is_approved = db.Column(db.Boolean, default=False)
+    rejection_reason = db.Column(db.Text)
+
+    # Media
+    images = db.Column(JSONB)
+    videos = db.Column(JSONB)
+    audio_files = db.Column(JSONB)
+    documents = db.Column(JSONB)
+
+    # SQLAlchemy Relationships
+    company = db.relationship('Company', backref='work_orders')
+    equipment = db.relationship('Equipment', backref='work_orders')
+    location = db.relationship('Location', backref='work_orders')
+    created_by = db.relationship('User', foreign_keys=[created_by_id], backref='created_work_orders')
+    assigned_user = db.relationship('User', foreign_keys=[assigned_to_user_id], backref='assigned_work_orders')
+    assigned_team = db.relationship('Team', foreign_keys=[assigned_to_team_id], backref='work_orders')

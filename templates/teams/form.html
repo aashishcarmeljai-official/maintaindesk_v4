@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">{% if team %}Edit Team{% else %}Create New Team{% endif %}</h1>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <form id="teamForm" method="POST" action="{{ url_for('add_team') if not team else url_for('edit_team', team_id=team.id) }}">
+        <div class="row">
+            <!-- Left Column: Team Details -->
+            <div class="col-lg-7">
+                <div class="card">
+                    <div class="card-header"><h5 class="mb-0">Team Details</h5></div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Team Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="name" name="name" value="{{ team.name or '' }}" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control" id="description" name="description" rows="5">{{ team.description or '' }}</textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Add Members -->
+            <div class="col-lg-5">
+                <div class="card">
+                    <div class="card-header"><h5 class="mb-0">Add Members</h5></div>
+                    <div class="card-body">
+                        <input type="text" id="member-search" class="form-control mb-2" placeholder="Search users...">
+                        <div class="form-control association-list" id="member-list">
+                            {% set selected_member_ids = team.members | map(attribute='id') | list if team else [] %}
+                            {% for user in form_data.all_users %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="member_ids" value="{{ user.id }}" id="user-{{ user.id }}"
+                                       {% if user.id in selected_member_ids %}checked{% endif %}>
+                                <label class="form-check-label" for="user-{{ user.id }}">
+                                    {{ user.first_name }} {{ user.last_name }} <small class="text-muted">({{ user.username }})</small>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-end mt-4">
+            <a href="{{ url_for('manage_teams') }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary" form="teamForm">Save Team</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // --- Member List Filtering ---
+    function setupAssociationFilter(inputId, listId) {
+        const searchInput = document.getElementById(inputId);
+        const itemList = document.getElementById(listId);
+        if (!searchInput) return;
+
+        const allItems = itemList.querySelectorAll('.form-check');
+        searchInput.addEventListener('keyup', function() {
+            const searchTerm = this.value.toLowerCase();
+            allItems.forEach(item => {
+                const itemText = item.querySelector('.form-check-label').textContent.toLowerCase();
+                item.style.display = itemText.includes(searchTerm) ? 'block' : 'none';
+            });
+        });
+    }
+    setupAssociationFilter('member-search', 'member-list');
+});
+</script>
+{% endblock %}

@@ -13,8 +13,9 @@
                     <span>Dashboard</span>
                 </a>
             </li>
-            <li class="sidebar-item">
-                <a class="sidebar-link" href="#">
+            {% set wo_endpoints = ['manage_work_orders', 'add_work_order'] %}
+            <li class="sidebar-item {% if request.endpoint in wo_endpoints %}active{% endif %}">
+                <a class="sidebar-link" href="{{ url_for('manage_work_orders') }}">
                     <i class="bi bi-wrench-adjustable-circle"></i>
                     <span>Work Orders</span>
                 </a>
@@ -41,7 +42,7 @@
             </li>
 
             <!-- Users & Company Management -->
-            {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'manage_roles', 'edit_role', 'create_role'] %}
+            {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'manage_roles', 'edit_role', 'create_role', 'manage_teams', 'add_team', 'edit_team'] %}
             <li class="sidebar-item {% if request.endpoint in users_teams_endpoints %}active{% endif %}">
                 <a class="sidebar-link {{ '' if request.endpoint in users_teams_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#usersCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in users_teams_endpoints else 'false' }}" aria-controls="usersCollapse">
                     <i class="bi bi-people-fill"></i>
@@ -53,7 +54,10 @@
                         <li class="sidebar-submenu-item {% if request.endpoint in ['manage_users', 'add_user', 'edit_user'] %}active{% endif %}">
                             <a href="{{ url_for('manage_users') }}" class="sidebar-link">Users</a>
                         </li>
-                        <li class="sidebar-submenu-item"><a href="#" class="sidebar-link">Teams</a></li>
+                        {% set team_endpoints = ['manage_teams', 'add_team', 'edit_team'] %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in team_endpoints %}active{% endif %}">
+                            <a href="{{ url_for('manage_teams') }}" class="sidebar-link">Teams</a>
+                        </li>
                         <li class="sidebar-submenu-item {% if request.endpoint in ['manage_roles', 'edit_role', 'create_role'] %}active{% endif %}">
                             <a href="{{ url_for('manage_roles') }}" class="sidebar-link">Roles</a>
                         </li>
@@ -86,7 +90,10 @@
             <!-- Section Separator: System -->
             <li class="sidebar-section-header">System & Notifications</li>
             <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-broadcast"></i><span>Emergency Broadcast</span></a></li>
-            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-bell-fill"></i><span>Notification Logs</span></a></li>
+            {% set log_endpoints = ['notification_logs'] %}
+            <li class="sidebar-item {% if request.endpoint in log_endpoints %}active{% endif %}">
+                <a class="sidebar-link" href="{{ url_for('notification_logs') }}"><i class="bi bi-bell-fill"></i><span>Notification Logs</span></a>
+            </li>
             <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-sliders"></i><span>System Settings</span></a></li>
         </ul>
     </div>

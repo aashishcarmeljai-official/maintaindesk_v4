@@ -9,7 +9,7 @@
             <p class="text-muted mb-0">Manage all user accounts for your company.</p>
         </div>
         <div>
-            <a href="#" class="btn btn-secondary"><i class="bi bi-envelope-plus-fill me-1"></i> Invite Users</a>
+            <a href="{{ url_for('invite_user') }}" class="btn btn-secondary"><i class="bi bi-envelope-plus-fill me-1"></i> Invite Users</a>
             <a href="{{ url_for('add_user') }}" class="btn btn-primary ms-1"><i class="bi bi-plus-circle me-1"></i> Add User</a>
         </div>
     </div>
@@ -18,18 +18,31 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          {% if category == 'password' %}
-            <!-- Special display for the initial password -->
-            <div class="alert alert-info d-flex justify-content-between align-items-center" role="alert">
-                <div>
-                    <strong>Initial Password:</strong>
-                    <code id="initialPassword" class="ms-2">{{ message }}</code>
+          {% if category == 'credentials' %}
+            {% set password, user_id = message %}
+            <!-- Special display for credentials -->
+            <div class="alert alert-info" role="alert">
+                <h5 class="alert-heading">New User Credentials</h5>
+                <p class="mb-1"><strong>Username:</strong> {{ get_flashed_messages(category_filter=['info'])[0].split(': ')[1] }}</p>
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>Initial Password:</strong>
+                        <code id="initialPassword" class="ms-2">{{ password }}</code>
+                    </div>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="copyPasswordBtn" title="Copy password to clipboard">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                        <form action="{{ url_for('send_credentials_email', user_id=user_id) }}" method="POST" class="d-inline">
+                            <input type="hidden" name="password" value="{{ password }}">
+                            <button type="submit" class="btn btn-sm btn-outline-primary" title="Send credentials to user's email">
+                                <i class="bi bi-envelope-fill"></i> Send via Email
+                            </button>
+                        </form>
+                    </div>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="copyPasswordBtn" title="Copy to clipboard">
-                    <i class="bi bi-clipboard"></i> Copy
-                </button>
             </div>
-          {% else %}
+          {% elif category != 'info' %} {# Prevent standard 'info' from showing twice #}
             <!-- Standard display for all other messages -->
             <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
               {{ message }}

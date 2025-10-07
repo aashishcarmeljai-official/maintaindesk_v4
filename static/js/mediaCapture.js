@@ -17,6 +17,7 @@ if (captureModalEl) {
     let recordedChunks = [];
     let activeCaptureType = '';
     let activeFileInput = null;
+    let activePreviewHandler = null;
 
     const resetUI = () => {
         permError.style.display = 'none';
@@ -39,19 +40,25 @@ if (captureModalEl) {
             return;
         }
         
-        const dt = new DataTransfer();
-        if (activeFileInput.files) {
-            for (let i = 0; i < activeFileInput.files.length; i++) {
-                dt.items.add(activeFileInput.files[i]);
+        // Use the preview handler to add the file directly to fileStore
+        if (activePreviewHandler && activePreviewHandler.addFile) {
+            activePreviewHandler.addFile(file);
+            console.log('File added via preview handler');
+        } else {
+            // Fallback: add directly to input (without preview handler)
+            console.warn('No preview handler found, adding file directly to input');
+            const dt = new DataTransfer();
+            if (activeFileInput.files) {
+                for (let i = 0; i < activeFileInput.files.length; i++) {
+                    dt.items.add(activeFileInput.files[i]);
+                }
             }
+            dt.items.add(file);
+            activeFileInput.files = dt.files;
+            
+            // Trigger change event only in fallback mode
+            activeFileInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        dt.items.add(file);
-        activeFileInput.files = dt.files;
-        
-        console.log('Files in input now:', activeFileInput.files.length);
-        
-        // Trigger change event
-        activeFileInput.dispatchEvent(new Event('change', { bubbles: true }));
         
         // Close modal
         captureModal.hide();
@@ -165,6 +172,15 @@ if (captureModalEl) {
         console.log('Looking for input with ID:', inputId);
         activeFileInput = document.getElementById(inputId);
         console.log('Found input:', activeFileInput ? 'YES' : 'NO');
+        
+        // Get the preview handler for this input
+        if (window.previewHandlers && window.previewHandlers[inputId]) {
+            activePreviewHandler = window.previewHandlers[inputId];
+            console.log('Preview handler found for:', inputId);
+        } else {
+            activePreviewHandler = null;
+            console.warn('No preview handler found for:', inputId);
+        }
         
         if (!activeFileInput) {
             console.error('Could not find input element with ID:', inputId);

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">{{ team.name }}</h1>
+        </div>
+        <div>
+            <a href="{{ url_for('edit_team', team_id=team.id) }}" class="btn btn-primary"><i class="bi bi-pencil-square me-1"></i> Edit Team</a>
+            <a href="{{ url_for('manage_teams') }}" class="btn btn-secondary ms-1">
+                <i class="bi bi-arrow-left me-1"></i> Back to All Teams
+            </a>
+        </div>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <div class="row">
+        <!-- Main Column -->
+        <div class="col-lg-7">
+            <!-- Team Information Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Team Information</h5></div>
+                <div class="card-body">
+                    <h6>Description</h6>
+                    <p>{{ team.description or 'No description provided.' }}</p>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-6"><strong>Status:</strong>
+                            {% if team.is_active %}<span class="badge bg-success">Active</span>
+                            {% else %}<span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6"><strong>Created:</strong> {{ team.created_at.strftime('%B %d, %Y') }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Members Column -->
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Team Members ({{ team.members|length }})</h5></div>
+                <div class="list-group list-group-flush">
+                    {% if team.members %}
+                        {% for member in team.members %}
+                        <a href="{{ url_for('view_user_profile', user_id=member.id) }}" class="list-group-item list-group-item-action">
+                            <div>{{ member.first_name }} {{ member.last_name }}</div>
+                            <small class="text-muted">{{ member.role.name if member.role else 'No Role' }}</small>
+                        </a>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-group-item">
+                            <p class="text-muted mb-0">No members have been assigned to this team.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

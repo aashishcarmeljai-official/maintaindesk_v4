@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">Work Orders</h1>
+            <p class="text-muted mb-0">Manage all maintenance tasks and requests.</p>
+        </div>
+        <a href="{{ url_for('add_work_order') }}" class="btn btn-primary mt-2">
+            <i class="bi bi-plus-circle me-1"></i> Create Work Order
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <!-- Search Bar -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <form action="{{ url_for('manage_work_orders') }}" method="GET" class="d-flex">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="search" class="form-control" name="q" placeholder="Search by Title, WO #, or Equipment Name..." value="{{ search_query or '' }}">
+                    <button class="btn btn-outline-secondary" type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('manage_work_orders') }}" class="btn btn-outline-danger" title="Clear Search">&times;</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Content Card with Tabs -->
+    <div class="card">
+        <div class="card-header">
+            <ul class="nav nav-tabs card-header-tabs" id="woTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="all-wo-tab" data-bs-toggle="tab" data-bs-target="#all-wo-pane" type="button">All Work Orders</button>
+                </li>
+                {% if can_approve %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link position-relative" id="requests-tab" data-bs-toggle="tab" data-bs-target="#requests-pane" type="button">
+                        Requests
+                        {% if work_order_requests and work_order_requests|length > 0 %}
+                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                            {{ work_order_requests|length }}
+                        </span>
+                        {% endif %}
+                    </button>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+        <div class="card-body">
+            <div class="tab-content" id="woTabContent">
+                <!-- All Work Orders Pane -->
+                <div class="tab-pane fade show active" id="all-wo-pane" role="tabpanel">
+                    {% if work_orders %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Work Order #</th>
+                                        <th>Title</th>
+                                        <th>Equipment</th>
+                                        <th>Location</th>
+                                        <th>Assigned To</th>
+                                        <th>Priority</th>
+                                        <th>Status</th>
+                                        <th>Type</th>
+                                        <th>Scheduled</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for wo in work_orders %}
+                                    <tr>
+                                        <td><code>#{{ wo.id }}</code></td>
+                                        <td>{{ wo.title }}</td>
+                                        <td>{{ wo.equipment.name if wo.equipment else 'N/A' }}</td>
+                                        <td>{{ wo.location.name if wo.location else 'N/A' }}</td>
+                                        <td>
+                                            {% if wo.assigned_user %}{{ wo.assigned_user.first_name }} {{ wo.assigned_user.last_name }}
+                                            {% elif wo.assigned_team %}{{ wo.assigned_team.name }} (Team)
+                                            {% else %}Unassigned{% endif %}
+                                        </td>
+                                        <td>{{ wo.priority }}</td>
+                                        <td><span class="badge bg-info">{{ wo.status }}</span></td> <!-- We'll add dynamic colors later -->
+                                        <td>{{ wo.work_order_type }}</td>
+                                        <td>{{ wo.scheduled_date.strftime('%Y-%m-%d') if wo.scheduled_date else 'N/A' }}</td>
+                                        <td class="text-end">
+                                            {% set can_manage = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in (current_user.role.permissions | map(attribute='name')) %}
+                                            {% set is_creator = wo.created_by_id == current_user.id %}
+
+                                            <!-- View Button: Always visible to anyone who can see the WO -->
+                                            <a href="{{ url_for('view_work_order', wo_id=wo.id) }}" class="btn btn-sm btn-outline-info" title="View">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+
+                                            <!-- Edit Button Logic -->
+                                            {% if can_manage or is_creator %}
+                                                <a href="{{ url_for('edit_work_order', wo_id=wo.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
+                                                    <i class="bi bi-pencil-square"></i>
+                                                </a>
+                                            {% endif %}
+
+                                            <!-- Delete Button Logic -->
+                                            {% if can_manage or is_creator %}
+                                                <form action="{{ url_for('delete_work_order', wo_id=wo.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure? This will require re-approval if you are not an admin.');">
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center p-5">
+                            <i class="bi bi-wrench-adjustable-circle fs-1 text-muted"></i>
+                            <h5 class="mt-3">No Work Orders Found</h5>
+                            <p class="text-muted">Get started by creating a new work order.</p>
+                            <a href="{{ url_for('add_work_order') }}" class="btn btn-primary mt-2"><i class="bi bi-plus-circle me-1"></i> Create Work Order</a>
+                        </div>
+                    {% endif %}
+                </div>
+                <!-- Requests Pane -->
+                {% if can_approve %}
+                <div class="tab-pane fade" id="requests-pane" role="tabpanel">
+                    {% if work_order_requests %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>WO #</th>
+                                        <th>Title</th>
+                                        <th>Equipment</th>
+                                        <th>Created By</th>
+                                        <th>Priority</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for req in work_order_requests %}
+                                    <tr>
+                                        <td><code>#{{ req.id }}</code></td>
+                                        <td>{{ req.title }}</td>
+                                        <td>{{ req.equipment.name if req.equipment else 'N/A' }}</td>
+                                        <td>{{ req.created_by.first_name }} {{ req.created_by.last_name }}</td>
+                                        <td>{{ req.priority }}</td>
+                                        <td class="text-end">
+                                            <!-- Reject button triggers modal -->
+                                            <button type="button" class="btn btn-sm btn-outline-danger" 
+                                                    data-bs-toggle="modal" data-bs-target="#rejectModal" 
+                                                    data-wo-id="{{ req.id }}" data-wo-title="{{ req.title }}">
+                                                Reject
+                                            </button>
+                                            <!-- Approve button is a direct form submission -->
+                                            <form action="{{ url_for('approve_work_order', wo_id=req.id) }}" method="POST" class="d-inline ms-1">
+                                                <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center p-5">
+                            <i class="bi bi-check2-circle fs-1 text-muted"></i>
+                            <h5 class="mt-3">All Caught Up!</h5>
+                            <p class="text-muted">There are no pending work order requests.</p>
+                        </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="rejectModal" tabindex="-1" aria-labelledby="rejectModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="rejectModalLabel">Reject Work Order Request</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="rejectForm" method="POST">
+          <div class="modal-body">
+            <p>You are about to reject Work Order <strong id="rejectModalWoTitle"></strong>.</p>
+            <div class="mb-3">
+                <label for="rejection_reason" class="form-label">Reason for Rejection <span class="text-danger">*</span></label>
+                <textarea class="form-control" id="rejection_reason" name="rejection_reason" rows="3" required></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-danger">Confirm Rejection</button>
+          </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const rejectModalEl = document.getElementById('rejectModal');
+    if (rejectModalEl) {
+        const rejectForm = document.getElementById('rejectForm');
+        const rejectModalWoTitle = document.getElementById('rejectModalWoTitle');
+
+        rejectModalEl.addEventListener('show.bs.modal', function(event) {
+            const button = event.relatedTarget;
+            const woId = button.dataset.woId;
+            const woTitle = button.dataset.woTitle;
+
+            // Update the form's action URL and the title in the modal
+            rejectForm.action = `/work-orders/reject/${woId}`;
+            rejectModalWoTitle.textContent = `#${woId}: ${woTitle}`;
+        });
+    }
+});
+</script>
+{% endblock %}

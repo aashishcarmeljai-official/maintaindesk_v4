@@ -1,0 +1,171 @@
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+<script src="{{ url_for('static', filename='js/mediaCapture.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // --- PART 1: PAGE-SPECIFIC INITIALIZATION ---
+
+    // Generic ID Generation (Handles Equipment and Inventory)
+    const nameInput = document.getElementById('name');
+    const idInput = document.getElementById('equipment_id') || document.getElementById('part_number');
+    if (idInput && !idInput.value) { // Only run on 'add' pages where the ID is empty
+        const prefix = (idInput.id === 'equipment_id') ? 'EQ' : 'PART';
+        nameInput.addEventListener('keyup', function() {
+            const name = this.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/\s+/g, '-');
+            idInput.value = `${prefix}-${name}-${Date.now().toString().slice(-6)}`;
+        });
+    }
+
+    // Generic TomSelect Initialization for all possible dropdowns
+    const tomSelects = {};
+    const selectIds = [
+        'category_id', 'location_id', 'department_id', 'manufacturer_id', 'supplier_id',
+        'currency_id', 'unit_of_measure_id', 'equipment_id',
+        'assigned_to_user_id', 'assigned_to_team_id'
+    ];
+    selectIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            let config = { create: false, placeholder: 'Select...' };
+            if (id === 'currency_id') {
+                config.render = {
+                    option: (data, escape) => `<div>${escape(data.text)} ${data.symbol ? `(${escape(data.symbol)})` : ''}</div>`,
+                    item: (data, escape) => `<div>${escape(data.text)} ${data.symbol ? `(${escape(data.symbol)})` : ''}</div>`
+                };
+            }
+            tomSelects[id] = new TomSelect(el, config);
+        }
+    });
+
+    // Generic Refresh Logic for all dropdowns
+    document.querySelectorAll('.refresh-btn').forEach(button => {
+        button.addEventListener('click', async function() {
+            const type = this.dataset.type;
+            const apiUrl = this.dataset.apiUrl;
+            if (!apiUrl || apiUrl === '#') return;
+
+            const typeToIdMap = {
+                'category': 'category_id', 'location': 'location_id', 'department': 'department_id',
+                'manufacturer': 'manufacturer_id', 'supplier': 'supplier_id', 'currency': 'currency_id',
+                'unit_of_measure': 'unit_of_measure_id', 'equipment': 'equipment_id',
+                'technician': 'assigned_to_user_id', 'team': 'assigned_to_team_id'
+            };
+            const selectId = typeToIdMap[type];
+            const selectInstance = tomSelects[selectId];
+            if (!selectInstance) return;
+
+            const icon = this.querySelector('i'); icon.classList.add('icon-spin'); this.disabled = true;
+            try {
+                const response = await fetch(apiUrl); const data = await response.json(); const selectedValue = selectInstance.getValue();
+                selectInstance.clear(); selectInstance.clearOptions();
+                let newOptions;
+                if (type === 'unit_of_measure') newOptions = data.map(item => ({ value: item.id, text: `${item.name} (${item.symbol || ''})` }));
+                else if (type === 'currency') newOptions = data.map(item => ({ value: item.id, text: item.code, symbol: item.symbol }));
+                else if (type === 'technician') newOptions = data.map(item => ({ value: item.id, text: item.name }));
+                else newOptions = data.map(item => ({ value: item.id, text: item.name }));
+                selectInstance.addOptions(newOptions);
+                if (selectedValue) { selectInstance.setValue(selectedValue, true); }
+            } catch (error) { console.error(`Error refreshing ${type} list:`, error); } 
+            finally { icon.classList.remove('icon-spin'); this.disabled = false; }
+        });
+    });
+
+    // --- PART 2: GENERIC MEDIA LOGIC ---
+
+    // Generic Client-Side File Preview Logic
+    function setupFilePreview(inputId, previewContainerId) {
+        const fileInput = document.getElementById(inputId);
+        const previewContainer = document.getElementById(previewContainerId);
+        if (!fileInput) return null; // Return null if not found
+        
+        let fileStore = new DataTransfer();
+
+        fileInput.addEventListener('change', function(event) {
+            const files = event.target.files;
+            for (let i = 0; i < files.length; i++) {
+                fileStore.items.add(files[i]);
+            }
+            fileInput.files = fileStore.files;
+            renderPreviews();
+        });
+
+        function renderPreviews() {
+            previewContainer.innerHTML = '';
+            
+            Array.from(fileStore.files).forEach((file, index) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'col-auto';
+                const card = document.createElement('div');
+                card.className = 'card h-100 position-relative';
+                card.style.width = '120px';
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'btn btn-sm btn-danger position-absolute top-0 end-0 m-1 p-0 lh-1';
+                removeBtn.style.cssText = 'width: 1.2rem; height: 1.2rem;';
+                removeBtn.innerHTML = '&times;';
+                removeBtn.type = 'button';
+                removeBtn.title = 'Remove ' + file.name;
+
+                removeBtn.onclick = function() {
+                    const newFileStore = new DataTransfer();
+                    const currentFiles = Array.from(fileStore.files);
+                    
+                    currentFiles.forEach((f, i) => {
+                        if (i !== index) {
+                            newFileStore.items.add(f);
+                        }
+                    });
+                    
+                    fileStore = newFileStore;
+                    fileInput.files = fileStore.files;
+                    renderPreviews();
+                };
+
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const content = `<img src="${e.target.result}" class="card-img-top" style="object-fit: cover; height: 80px;" alt="Preview">`;
+                        card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
+                        card.prepend(removeBtn);
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    let icon = 'bi-file-earmark-text';
+                    if (file.type.startsWith('video/')) icon = 'bi-film';
+                    if (file.type.startsWith('audio/')) icon = 'bi-music-note-beamed';
+                    const content = `<div class="text-center p-3"><i class="bi ${icon} fs-2"></i></div>`;
+                    card.innerHTML = content + `<div class="card-body p-1 text-center"><p class="card-text small text-truncate">${file.name}</p></div>`;
+                    card.prepend(removeBtn);
+                }
+                wrapper.appendChild(card);
+                previewContainer.appendChild(wrapper);
+            });
+        }
+        
+        // Return an object with a method to add files externally
+        return {
+            addFile: function(file) {
+                fileStore.items.add(file);
+                fileInput.files = fileStore.files;
+                renderPreviews();
+            }
+        };
+    }
+    
+    // Initialize preview handlers and store them globally for mediaCapture.js
+    window.previewHandlers = {
+        images: setupFilePreview('images', 'images-preview'),
+        videos: setupFilePreview('videos', 'videos-preview'),
+        audio_files: setupFilePreview('audio_files', 'audio_files-preview'),
+        documents: setupFilePreview('documents', 'documents-preview')
+    };
+    
+    // Generic event listener for deleting existing media files
+    document.querySelectorAll('.existing-media-delete-btn').forEach(button => {
+        button.addEventListener('click', function(event) {
+            if (confirm('Are you sure you want to permanently delete this file?')) {
+                event.target.closest('form').submit();
+            }
+        });
+    });
+});
+</script>
