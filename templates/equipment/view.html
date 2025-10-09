@@ -123,14 +123,22 @@
             <div class="card">
                 <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
                 <div class="list-group list-group-flush">
-                    <a href="{{ url_for('edit_equipment', equip_id=equipment.id) }}" class="list-group-item list-group-item-action"><i class="bi bi-pencil-square me-2"></i>Edit Equipment</a>
+                    {% if has_permission('CAN_EDIT_EQUIPMENT') %}
+                    <a href="{{ url_for('edit_equipment', equip_id=equipment.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-pencil-square me-2"></i>Edit Equipment
+                    </a>
+                    {% endif %}
+
                     <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-tools me-2"></i>Create Work Order</a>
                     <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-qr-code me-2"></i>Generate QR Code</a>
                     <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-card-list me-2"></i>View Work Orders</a>
                     <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-box-seam me-2"></i>Check Inventory</a>
+
+                    {% if has_permission('CAN_DELETE_EQUIPMENT') %}
                     <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
                         <i class="bi bi-trash me-2"></i>Delete Equipment
                     </a>
+                    {% endif %}
                 </div>
             </div>
         </div>

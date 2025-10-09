@@ -2,7 +2,154 @@
 
 {% block content %}
 <div class="container-fluid p-4">
-    <h1>Welcome to MaintainDesk</h1>
-    <p>This is the main content area.</p>
+    <h1 class="h3 mb-3">Dashboard</h1>
+
+    <!-- 1. Stats Cards with Icons -->
+    <div class="row">
+        <div class="col-md-6 col-lg-3 mb-4">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                        <div class="icon-circle bg-primary text-white"><i class="bi bi-box-seam fs-2"></i></div>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                        <h5 class="card-title text-muted mb-1">Total Equipment</h5>
+                        <h1 class="display-5 fw-bold">{{ stats.total_equipment }}</h1>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3 mb-4">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                        <div class="icon-circle bg-success text-white"><i class="bi bi-shield-check fs-2"></i></div>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                        <h5 class="card-title text-muted mb-1">Operational</h5>
+                        <h1 class="display-5 fw-bold">{{ stats.operational_equipment }}</h1>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3 mb-4">
+            <div class="card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                        <div class="icon-circle bg-info text-white"><i class="bi bi-wrench-adjustable-circle fs-2"></i></div>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                        <h5 class="card-title text-muted mb-1">Active WOs</h5>
+                        <h1 class="display-5 fw-bold">{{ stats.active_wo_count }}</h1>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3 mb-4">
+            <div class="card h-100 {{ 'border-warning border-2' if stats.low_stock_items > 0 else '' }}">
+                <a href="#" class="text-decoration-none {{ 'text-dark' if stats.low_stock_items > 0 else 'text-body' }}">
+                    <div class="card-body d-flex align-items-center">
+                        <div class="flex-shrink-0">
+                            <div class="icon-circle {{ 'bg-warning' if stats.low_stock_items > 0 else 'bg-secondary text-white' }}"><i class="bi bi-exclamation-triangle fs-2"></i></div>
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <h5 class="card-title text-muted mb-1">Low Stock Items</h5>
+                            <h1 class="display-5 fw-bold">{{ stats.low_stock_items }}</h1>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- 2. My Recent Work Orders (Improved Look) -->
+        <div class="col-lg-5 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">My Recent Work Orders</h5>
+                    <a href="{{ url_for('manage_work_orders') }}" class="btn btn-sm btn-outline-primary">View All</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% for wo in recent_work_orders %}
+                    <a href="{{ url_for('view_work_order', wo_id=wo.id) }}" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">#{{ wo.id }} - {{ wo.title }}</h6>
+                            <small class="text-muted">{{ wo.created_at.strftime('%b %d') }}</small>
+                        </div>
+                        <p class="mb-1 small text-muted">{{ wo.equipment.name if wo.equipment else 'N/A' }}</p>
+                        <div>
+                            <span class="badge rounded-pill text-bg-light">{{ wo.status }}</span>
+                            <span class="badge rounded-pill text-bg-light">{{ wo.priority }}</span>
+                        </div>
+                    </a>
+                    {% else %}
+                    <div class="list-group-item text-center p-4">
+                        <p class="text-muted mb-0">No recent work orders to display.</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Calendar -->
+        <div class="col-lg-7 mb-4">
+            <div class="card h-100">
+                 <div class="card-body">
+                     <div id='calendar'></div>
+                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. Quick Actions -->
+     <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
+                <div class="card-body">
+                    <div class="d-flex flex-wrap gap-2">
+                        {% if has_permission('CAN_CREATE_WORK_ORDER') %}
+                        <a href="{{ url_for('add_work_order') }}" class="btn btn-primary"><i class="bi bi-tools me-2"></i>Create Work Order</a>
+                        {% endif %}
+                        {% if has_permission('CAN_ADD_EQUIPMENT') %}
+                        <a href="{{ url_for('add_equipment') }}" class="btn btn-outline-secondary"><i class="bi bi-plus-circle me-2"></i>Add Equipment</a>
+                        {% endif %}
+                        {% if has_permission('CAN_ADD_INVENTORY') %}
+                        <a href="{{ url_for('add_inventory_item') }}" class="btn btn-outline-secondary"><i class="bi bi-box-seam me-2"></i>Add Inventory Item</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var calendarEl = document.getElementById('calendar');
+    var calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek'
+        },
+        events: {{ calendar_events | safe }},
+        eventClick: function(info) {
+            info.jsEvent.preventDefault(); // Prevent browser from following link
+            if (info.event.url) {
+                window.location.href = info.event.url; // Navigate on click
+            }
+        },
+        // This helps the calendar resize correctly when tabs or other elements change
+        windowResize: function(view) {
+            calendar.updateSize();
+        }
+    });
+    calendar.render();
+});
+</script>
 {% endblock %}

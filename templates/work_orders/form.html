@@ -29,7 +29,7 @@
                             <div class="col-md-6 mb-3">
                                 <label for="equipment_id" class="form-label">Equipment <span class="text-danger">*</span></label>
                                 <div class="input-group">
-                                    <select id="equipment_id" name="equipment_id" required>
+                                    <select class="form-select" id="equipment_id" name="equipment_id" required>
                                         <option value="">Select equipment...</option>
                                         {% for eq in form_data.equipment %}<option value="{{ eq.id }}" {% if wo and wo.equipment_id == eq.id %}selected{% endif %}>{{ eq.name }}</option>{% endfor %}
                                     </select>
@@ -40,7 +40,7 @@
                             <div class="col-md-6 mb-3">
                                 <label for="location_id" class="form-label">Location</label>
                                 <div class="input-group">
-                                    <select id="location_id" name="location_id">
+                                    <select class="form-select" id="location_id" name="location_id">
                                         <option value="">Select location...</option>
                                         {% for loc in form_data.locations %}<option value="{{ loc.id }}" {% if wo and wo.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>{% endfor %}
                                     </select>
@@ -61,10 +61,35 @@
                     <div class="card-body">
                         <h6 class="mt-4">Add New Media</h6>
                         <p class="text-muted small">Upload or capture relevant photos, videos, or documents.</p>
-                        <div class="mb-3"><label for="images" class="form-label">Images</label><div class="input-group"><input class="form-control" type="file" id="images" name="images" multiple accept="image/*"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="image"><i class="bi bi-camera-fill me-1"></i> Capture</button></div><div class="row gx-2 gy-2 mt-2" id="images-preview"></div></div>
-                        <div class="mb-3"><label for="videos" class="form-label">Videos</label><div class="input-group"><input class="form-control" type="file" id="videos" name="videos" multiple accept="video/*"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="video"><i class="bi bi-camera-reels-fill me-1"></i> Record</button></div><div class="row gx-2 gy-2 mt-2" id="videos-preview"></div></div>
-                        <div class="mb-3"><label for="audio_files" class="form-label">Audio Notes</label><div class="input-group"><input class="form-control" type="file" id="audio_files" name="audio_files" multiple accept="audio/*"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="audio"><i class="bi bi-mic-fill me-1"></i> Record</button></div><div class="row gx-2 gy-2 mt-2" id="audio_files-preview"></div></div>
-                        <div class="mb-3"><label for="documents" class="form-label">Documents</label><input class="form-control" type="file" id="documents" name="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"><div class="row gx-2 gy-2 mt-2" id="documents-preview"></div></div>
+                        <div class="mb-3">
+                            <label for="images" class="form-label">Images</label>
+                            <div class="input-group">
+                                <input class="form-control" type="file" id="images" name="images" multiple accept="image/*">
+                                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="image"><i class="bi bi-camera-fill me-1"></i> Capture</button>
+                            </div>
+                            <div class="row gx-2 gy-2 mt-2" id="images-preview"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="videos" class="form-label">Videos</label>
+                            <div class="input-group">
+                                <input class="form-control" type="file" id="videos" name="videos" multiple accept="video/*">
+                                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="video"><i class="bi bi-camera-reels-fill me-1"></i> Record</button>
+                            </div>
+                            <div class="row gx-2 gy-2 mt-2" id="videos-preview"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="audio_files" class="form-label">Audio Notes</label>
+                            <div class="input-group">
+                                <input class="form-control" type="file" id="audio_files" name="audio_files" multiple accept="audio/*">
+                                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="audio"><i class="bi bi-mic-fill me-1"></i> Record</button>
+                            </div>
+                            <div class="row gx-2 gy-2 mt-2" id="audio_files-preview"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="documents" class="form-label">Documents</label>
+                            <input class="form-control" type="file" id="documents" name="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
+                            <div class="row gx-2 gy-2 mt-2" id="documents-preview"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -98,7 +123,7 @@
                          <div class="mb-3">
                             <label for="assigned_to_user_id" class="form-label">Assign to Technician</label>
                             <div class="input-group">
-                                <select id="assigned_to_user_id" name="assigned_to_user_id">
+                                <select class="form-select" id="assigned_to_user_id" name="assigned_to_user_id">
                                     <option value="">Unassigned</option>
                                     {% for tech in form_data.technicians %}<option value="{{ tech.id }}" {% if wo and wo.assigned_to_user_id == tech.id %}selected{% endif %}>{{ tech.first_name }} {{tech.last_name}}</option>{% endfor %}
                                 </select>
@@ -109,7 +134,7 @@
                         <div class="mb-3">
                             <label for="assigned_to_team_id" class="form-label">Assign to Team</label>
                              <div class="input-group">
-                                <select id="assigned_to_team_id" name="assigned_to_team_id">
+                                <select class="form-select" id="assigned_to_team_id" name="assigned_to_team_id">
                                     <option value="">Unassigned</option>
                                     {% for team in form_data.teams %}<option value="{{ team.id }}" {% if wo and wo.assigned_to_team_id == team.id %}selected{% endif %}>{{ team.name }}</option>{% endfor %}
                                 </select>

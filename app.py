@@ -21,6 +21,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import joinedload, aliased, undefer
 from werkzeug.utils import secure_filename
 from sqlalchemy.dialects.postgresql import JSONB
+from permissions import PERMISSION_NAMES, ROLES_CONFIG
 
 load_dotenv()
 
@@ -131,16 +132,8 @@ def save_json_data(filepath, data):
         json.dump(data, f, indent=4)
 
 def create_default_roles_and_permissions(company_id):
-    permission_names = [
-        'CAN_MANAGE_ROLES', 'CAN_MANAGE_USERS', 'CAN_VIEW_DASHBOARD',
-        'CAN_CREATE_WORK_ORDER', 'CAN_EDIT_WORK_ORDER', 'CAN_DELETE_WORK_ORDER',
-        'CAN_MANAGE_ASSETS', 'CAN_VIEW_REPORTS', 'CAN_MANAGE_CATEGORIES', 'CAN_MANAGE_DEPARTMENTS',
-        'CAN_MANAGE_LOCATIONS', 'CAN_MANAGE_EQUIPMENT', 'CAN_MANAGE_UNITS', 'CAN_MANAGE_CURRENCIES',
-        'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS', 'CAN_MANAGE_TEAMS', 'CAN_CREATE_WORK_ORDER',
-        'CAN_APPROVE_WORK_ORDER', 'CAN_MANAGE_ALL_WORK_ORDERS'
-    ]
     all_permissions = []
-    for name in permission_names:
+    for name in PERMISSION_NAMES:
         perm = Permission.query.filter_by(name=name).first()
         if not perm:
             perm = Permission(name=name)
@@ -148,14 +141,7 @@ def create_default_roles_and_permissions(company_id):
         all_permissions.append(perm)
     db.session.commit()
 
-    roles_config = {
-        'Admin': {'desc': 'Full access to all system features.', 'is_admin': True, 'perms': permission_names, 'level': 0},
-        'Manager': {'desc': 'Can manage work orders, assets, and users.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_CREATE_WORK_ORDER', 'CAN_EDIT_WORK_ORDER', 'CAN_MANAGE_ASSETS', 'CAN_MANAGE_USERS', 'CAN_MANAGE_CATEGORIES', 'CAN_MANAGE_DEPARTMENTS', 'CAN_MANAGE_LOCATIONS', 'CAN_MANAGE_EQUIPMENT', 'CAN_MANAGE_UNITS', 'CAN_MANAGE_CURRENCIES', 'CAN_MANAGE_INVENTORY', 'CAN_MANAGE_VENDORS', 'CAN_MANAGE_TEAMS', 'CAN_CREATE_WORK_ORDER', 'CAN_APPROVE_WORK_ORDER', 'CAN_MANAGE_ALL_WORK_ORDERS'], 'level': 10},
-        'Technician': {'desc': 'Can view and update assigned work orders.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_EDIT_WORK_ORDER', 'CAN_CREATE_WORK_ORDER'], 'level': 20},
-        'Viewer': {'desc': 'Read-only access to dashboards and reports.', 'is_admin': False, 'perms': ['CAN_VIEW_DASHBOARD', 'CAN_VIEW_REPORTS', 'CAN_CREATE_WORK_ORDER'], 'level': 30}
-    }
-
-    for name, config in roles_config.items():
+    for name, config in ROLES_CONFIG.items():
         role = Role(
             company_id=company_id,
             name=name,
@@ -163,6 +149,7 @@ def create_default_roles_and_permissions(company_id):
             is_admin=config['is_admin'],
             level=config['level']
         )
+        # Assign the correct permission objects based on the names in the config
         role.permissions = [p for p in all_permissions if p.name in config['perms']]
         db.session.add(role)
     
@@ -465,8 +452,418 @@ def signup_step3_details():
 
 @app.route('/')
 @login_required
+@permission_required('CAN_VIEW_DASHBOARD')
 def index():
-    return render_template('index.html')
+    company_id = current_user.company_id
+    
+    # --- 1. STATS FOR CARDS ---
+    total_equipment = Equipment.query.filter_by(company_id=company_id).count()
+    # Placeholder for a more complex "operational" status later
+    operational_equipment = total_equipment 
+    
+    low_stock_items = InventoryItem.query.filter(
+        InventoryItem.company_id == company_id,
+        InventoryItem.current_stock <= InventoryItem.minimum_stock
+    ).count()
+
+    # --- 2. WORK ORDER STATS & LIST (Permission-based) ---
+    can_manage_all = current_user.role.is_admin or 'CAN_MANAGE_ALL_WORK_ORDERS' in [p.name for p in current_user.role.permissions]
+    
+    # Base query for all work orders in the user's company
+    wo_query = WorkOrder.query.filter(WorkOrder.company_id == company_id)
+
+    # If the user is NOT a manager/admin, filter to only their relevant WOs
+    if not can_manage_all:
+        user_team_ids = [team.id for team in current_user.teams]
+        wo_query = wo_query.filter(
+            db.or_(
+                WorkOrder.created_by_id == current_user.id,
+                WorkOrder.assigned_to_user_id == current_user.id,
+                WorkOrder.assigned_to_team_id.in_(user_team_ids)
+            )
+        )
+
+    # Use a clone of the query to get the count of active WOs
+    active_wo_count_query = wo_query.filter(WorkOrder.status.in_(['Open', 'In Progress']))
+    active_wo_count = active_wo_count_query.count()
+
+    # Get the 5 most recent work orders for the list view
+    recent_work_orders = wo_query.order_by(WorkOrder.created_at.desc()).limit(5).all()
+
+    # --- 3. FORMAT DATA FOR FULLCALENDAR ---
+    # Get all scheduled work orders from the permission-filtered query
+    scheduled_wos = wo_query.filter(WorkOrder.scheduled_date.isnot(None)).all()
+    calendar_events = []
+    for wo in scheduled_wos:
+        # Define a color based on priority for the calendar event
+        color = '#3f8efc' # Default/Low
+        if wo.priority == 'Medium':
+            color = '#0dcaf0' # Info
+        elif wo.priority == 'High':
+            color = '#ffc107' # Warning
+        elif wo.priority == 'Urgent':
+            color = '#dc3545' # Danger
+
+        calendar_events.append({
+            'title': f"#{wo.id}: {wo.title}",
+            'start': wo.scheduled_date.isoformat(),
+            'url': url_for('view_work_order', wo_id=wo.id), # Make event clickable
+            'color': color, # Assign the color
+            'borderColor': color
+        })
+    
+    # --- 4. COMPILE FINAL STATS ---
+    stats = {
+        'total_equipment': total_equipment,
+        'operational_equipment': operational_equipment,
+        'active_wo_count': active_wo_count,
+        'low_stock_items': low_stock_items
+    }
+
+    return render_template(
+        'index.html', 
+        stats=stats, 
+        recent_work_orders=recent_work_orders,
+        # Pass the events as a JSON string, marked as 'safe' to be rendered correctly in the script tag
+        calendar_events=json.dumps(calendar_events)
+    )
+    
+    
+# --- SYSTEM ROUTES ---
+
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_MANAGE_SETTINGS')
+def system_settings():
+    company = current_user.company
+    
+    if request.method == 'POST':
+        # This will handle the 'General' tab form submission
+        company.name = request.form.get('company_name')
+        db.session.commit()
+        flash('Company settings updated successfully.', 'success')
+        return redirect(url_for('system_settings'))
+
+    # Get stats for the general info tab
+    stats = {
+        'user_count': User.query.filter_by(company_id=company.id).count(),
+        'user_limit': company.user_limit,
+        'equipment_count': Equipment.query.filter_by(company_id=company.id).count(),
+        'inventory_count': InventoryItem.query.filter_by(company_id=company.id).count(),
+        'wo_count': WorkOrder.query.filter_by(company_id=company.id).count(),
+    }
+
+    return render_template('settings/index.html', company=company, stats=stats)
+
+
+@app.route('/settings/backup')
+@login_required
+@permission_required('CAN_MANAGE_SETTINGS')
+def backup_data():
+    """
+    Queries all data for the user's company, serializes it to JSON,
+    and serves it as a downloadable file.
+    """
+    company_id = current_user.company_id
+    # Eagerly load all collections to make serialization fast
+    company = Company.query.options(
+        joinedload(Company.categories),
+        joinedload(Company.departments),
+        joinedload(Company.locations),
+        joinedload(Company.vendors).joinedload(Vendor.contacts),
+        joinedload(Company.equipment).options(joinedload(Equipment.category), joinedload(Equipment.manufacturer), joinedload(Equipment.location)),
+        joinedload(Company.inventory_items).options(joinedload(InventoryItem.category), joinedload(InventoryItem.location), joinedload(InventoryItem.currency), joinedload(InventoryItem.unit_of_measure)),
+        joinedload(Company.work_orders).options(joinedload(WorkOrder.equipment), joinedload(WorkOrder.location), joinedload(WorkOrder.created_by), joinedload(WorkOrder.assigned_user), joinedload(WorkOrder.assigned_team)),
+        joinedload(Company.users).options(joinedload(User.role), joinedload(User.department)),
+        joinedload(Company.roles).joinedload(Role.permissions),
+        joinedload(Company.teams).joinedload(Team.members),
+        joinedload(Company.units),
+        joinedload(Company.currencies)
+    ).get(company_id)
+
+    if not company:
+        flash('Company data could not be loaded.', 'danger')
+        return redirect(url_for('system_settings'))
+
+    # --- 1. GATHER AND SERIALIZE ALL COMPANY DATA ---
+    
+    # Simple data models
+    departments = [{'name': d.name, 'description': d.description} for d in company.departments]
+    locations = [{'name': loc.name, 'address': loc.address, 'country': loc.country, 'state': loc.state, 'city': loc.city, 'zip_code': loc.zip_code} for loc in company.locations]
+    categories = [{'name': c.name, 'description': c.description, 'category_type': c.category_type, 'color': c.color} for c in company.categories]
+    units = [{'name': u.name, 'symbol': u.symbol} for u in company.units]
+    currencies = [{'name': c.name, 'code': c.code, 'symbol': c.symbol} for c in company.currencies]
+    
+    # We only need to back up custom roles
+    roles = [{'name': r.name, 'description': r.description, 'permissions': [p.name for p in r.permissions]} 
+             for r in company.roles if not r.is_admin and r.name not in ['Manager', 'Technician', 'Viewer']]
+
+    # Users, excluding admins and never exporting passwords
+    users = [{'first_name': u.first_name, 'last_name': u.last_name, 'username': u.username, 'email': u.email, 'phone': u.phone, 'role': u.role.name if u.role else None, 'department': u.department.name if u.department else None, 'is_active': u.is_active}
+             for u in company.users if u.role and not u.role.is_admin]
+
+    teams = [{'name': t.name, 'description': t.description, 'members': [m.username for m in t.members]} 
+             for t in company.teams]
+             
+    # Vendors with nested contacts
+    vendors = []
+    for v in company.vendors:
+        vendor_data = {'name': v.name, 'description': v.description}
+        vendor_data['contacts'] = [{'name': contact.name, 'email': contact.email, 'phone': contact.phone, 'position': contact.position} for contact in v.contacts]
+        vendors.append(vendor_data)
+
+    # Equipment (linking by name/ID for portability)
+    equipment = [{'name': eq.name, 'equipment_id': eq.equipment_id, 'category': eq.category.name if eq.category else None, 'manufacturer': eq.manufacturer.name if eq.manufacturer else None, 'location': eq.location.name if eq.location else None, 'model': eq.model, 'serial_number': eq.serial_number, 'description': eq.description} 
+                 for eq in company.equipment]
+    
+    inventory_items = [{'name': item.name, 'part_number': item.part_number, 'description': item.description, 'category': item.category.name if item.category else None, 'location': item.location.name if item.location else None, 'unit_cost': str(item.unit_cost) if item.unit_cost is not None else None, 'currency': item.currency.code if item.currency else None, 'unit_of_measure': item.unit_of_measure.name if item.unit_of_measure else None, 'current_stock': item.current_stock, 'minimum_stock': item.minimum_stock} 
+                       for item in company.inventory_items]
+
+    work_orders = [{'title': wo.title, 'description': wo.description, 'priority': wo.priority, 'status': wo.status, 'work_order_type': wo.work_order_type, 'equipment': wo.equipment.equipment_id if wo.equipment else None, 'location': wo.location.name if wo.location else None, 'created_by': wo.created_by.username if wo.created_by else None, 'assigned_user': wo.assigned_user.username if wo.assigned_user else None, 'assigned_team': wo.assigned_team.name if wo.assigned_team else None, 'scheduled_date': wo.scheduled_date.isoformat() if wo.scheduled_date else None, 'due_date': wo.due_date.isoformat() if wo.due_date else None} 
+                   for wo in company.work_orders]
+    
+    # --- 2. COMPILE INTO A MASTER DICTIONARY ---
+    backup_content = {
+        'metadata': {
+            'company_name': company.name,
+            'export_date': datetime.now(timezone.utc).isoformat(),
+            'version': '1.0'
+        },
+        'data': {
+            # Data is ordered from least dependent to most dependent for easier restoration
+            'departments': departments,
+            'locations': locations,
+            'categories': categories,
+            'units': units,
+            'currencies': currencies,
+            'roles': roles,
+            'users': users,
+            'teams': teams,
+            'vendors': vendors,
+            'equipment': equipment,
+            'inventory_items': inventory_items,
+            'work_orders': work_orders,
+        }
+    }
+    
+    # --- 3. CREATE AND SERVE THE JSON FILE ---
+    json_data = json.dumps(backup_content, indent=4)
+    output = io.BytesIO(json_data.encode('utf-8'))
+    filename = f"maintaindesk_backup_{company.name.replace(' ', '_')}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.json"
+    
+    return Response(
+        output,
+        mimetype="application/json",
+        headers={"Content-Disposition": f"attachment;filename={filename}"}
+    )
+
+@app.route('/settings/restore', methods=['POST'])
+@login_required
+@permission_required('CAN_MANAGE_SETTINGS')
+def restore_data():
+    """
+    Restores company data from an uploaded JSON backup file.
+    WARNING: This is a destructive operation.
+    """
+    company_id = current_user.company_id
+    
+    # --- 1. File Validation ---
+    if 'backup_file' not in request.files:
+        flash('No backup file provided.', 'danger')
+        return redirect(url_for('system_settings'))
+    
+    file = request.files['backup_file']
+    if file.filename == '' or not file.filename.endswith('.json'):
+        flash('Invalid file. Please upload a valid .json backup file.', 'danger')
+        return redirect(url_for('system_settings'))
+
+    try:
+        # --- 2. Read and Parse JSON content ---
+        backup_content = json.load(file.stream)
+        
+        # Basic validation of the backup file structure
+        if 'metadata' not in backup_content or 'data' not in backup_content:
+            raise ValueError("Invalid backup file format: missing 'metadata' or 'data' keys.")
+        
+        data_to_restore = backup_content['data']
+        
+        # --- 3. THE DANGEROUS PART: Delete Existing Data ---
+        # This deletes data in reverse order of dependency.
+        print(f"--- STARTING RESTORE FOR COMPANY ID: {company_id} ---")
+        
+        WorkOrder.query.filter_by(company_id=company_id).delete()
+        InventoryItem.query.filter_by(company_id=company_id).delete()
+        Equipment.query.filter_by(company_id=company_id).delete()
+        Vendor.query.filter_by(company_id=company_id).delete() # This will cascade to VendorContact
+        Team.query.filter_by(company_id=company_id).delete() # This will clear the team_members table
+        # We don't delete the Admin user, but all other users.
+        User.query.filter(User.company_id == company_id, User.id != current_user.id).delete()
+        # We don't delete default roles.
+        Role.query.filter(Role.company_id == company_id, Role.is_admin == False, ~Role.name.in_(['Manager', 'Technician', 'Viewer'])).delete()
+        
+        # Simpler models
+        Currency.query.filter_by(company_id=company_id).delete()
+        Unit.query.filter_by(company_id=company_id).delete()
+        Category.query.filter_by(company_id=company_id).delete()
+        Location.query.filter_by(company_id=company_id).delete()
+        Department.query.filter_by(company_id=company_id).delete()
+
+        db.session.commit() # Commit the deletions
+        print("Existing data cleared.")
+
+        # --- 4. Re-insert Data in Order of Dependency ---
+        # Pre-fetch default/existing items to link against
+        print("Re-inserting data...")
+
+        # These simple models can be created first as they have few dependencies.
+        for dept_data in data_to_restore.get('departments', []):
+            db.session.add(Department(company_id=company_id, **dept_data))
+            
+        for loc_data in data_to_restore.get('locations', []):
+            db.session.add(Location(company_id=company_id, **loc_data))
+            
+        for cat_data in data_to_restore.get('categories', []):
+            # The backup used 'type', but the model uses 'category_type'
+            cat_data['category_type'] = cat_data.pop('type', None)
+            db.session.add(Category(company_id=company_id, **cat_data))
+
+        for unit_data in data_to_restore.get('units', []):
+            db.session.add(Unit(company_id=company_id, **unit_data))
+
+        for curr_data in data_to_restore.get('currencies', []):
+            db.session.add(Currency(company_id=company_id, **curr_data))
+            
+        # Re-create custom roles
+        all_permissions_map = {p.name: p for p in Permission.query.all()}
+        for role_data in data_to_restore.get('roles', []):
+            permission_names = role_data.pop('permissions', [])
+            new_role = Role(company_id=company_id, **role_data)
+            # Find and link the permission objects
+            new_role.permissions = [p for name, p in all_permissions_map.items() if name in permission_names]
+            db.session.add(new_role)
+
+        db.session.commit() # Commit these first to get their IDs
+        print("Committed basic data (depts, locs, etc).")
+
+        locations_map = {loc.name: loc for loc in Location.query.filter_by(company_id=company_id).all()}
+        categories_map = {cat.name: cat for cat in Category.query.filter_by(company_id=company_id).all()}
+        departments_map = {dept.name: dept for dept in Department.query.filter_by(company_id=company_id).all()}
+        units_map = {unit.name: unit for unit in Unit.query.filter_by(company_id=company_id).all()}
+        currencies_map = {curr.code: curr for curr in Currency.query.filter_by(company_id=company_id).all()}
+        roles_map = {role.name: role for role in Role.query.filter_by(company_id=company_id).all()}
+        
+        # We also need a map for users, as they are referenced by Work Orders
+        # We fetch all users for the company, including the admin running the restore
+        users_map = {user.username: user for user in User.query.filter_by(company_id=company_id).all()}
+        
+        vendors_map = {}
+        
+        # Re-insert Users (linking to roles and departments)
+        for user_data in data_to_restore.get('users', []):
+            role_name = user_data.pop('role', None)
+            dept_name = user_data.pop('department', None)
+            
+            # Generate a new random password; we never restore old ones
+            password = generate_random_password()
+            
+            user = User(
+                company_id=company_id,
+                password_reset_required=True,
+                **user_data
+            )
+            user.set_password(password)
+            
+            if role_name and role_name in roles_map:
+                user.role_id = roles_map[role_name].id
+            if dept_name and dept_name in departments_map:
+                user.department_id = departments_map[dept_name].id
+            
+            db.session.add(user)
+            # We need to re-build the users_map after creating them
+            users_map[user.username] = user
+
+        db.session.commit() # Commit users to get their IDs
+        print("Committed users.")
+
+        # Re-insert Teams (linking to users)
+        for team_data in data_to_restore.get('teams', []):
+            member_usernames = team_data.pop('members', [])
+            team = Team(company_id=company_id, **team_data)
+            # Find the user objects from our map
+            team.members = [u for uname, u in users_map.items() if uname in member_usernames]
+            db.session.add(team)
+            
+        # Re-insert Vendors
+        for vendor_data in data_to_restore.get('vendors', []):
+            contacts = vendor_data.pop('contacts', [])
+            vendor = Vendor(company_id=company_id, **vendor_data)
+            for contact_data in contacts:
+                vendor.contacts.append(VendorContact(company_id=company_id, **contact_data))
+            db.session.add(vendor)
+            vendors_map[vendor.name] = vendor # Populate the vendors map
+        
+        db.session.commit() # Commit teams and vendors
+        print("Committed teams and vendors.")
+
+        # Re-insert Equipment (linking to vendors, categories, locations)
+        for eq_data in data_to_restore.get('equipment', []):
+            category_name = eq_data.pop('category', None)
+            manufacturer_name = eq_data.pop('manufacturer', None)
+            location_name = eq_data.pop('location', None)
+            
+            eq_data['category_id'] = categories_map.get(category_name).id if category_name in categories_map else None
+            eq_data['manufacturer_id'] = vendors_map.get(manufacturer_name).id if manufacturer_name in vendors_map else None
+            eq_data['location_id'] = locations_map.get(location_name).id if location_name in locations_map else None
+            
+            db.session.add(Equipment(company_id=company_id, **eq_data))
+            
+        # Re-insert Inventory Items
+        for item_data in data_to_restore.get('inventory_items', []):
+            category_name = item_data.pop('category', None)
+            location_name = item_data.pop('location', None)
+            currency_code = item_data.pop('currency', None)
+            unit_name = item_data.pop('unit_of_measure', None)
+
+            item_data['category_id'] = categories_map.get(category_name).id if category_name in categories_map else None
+            item_data['location_id'] = locations_map.get(location_name).id if location_name in locations_map else None
+            item_data['currency_id'] = currencies_map.get(currency_code).id if currency_code in currencies_map else None
+            item_data['unit_of_measure_id'] = units_map.get(unit_name).id if unit_name in units_map else None
+            
+            db.session.add(InventoryItem(company_id=company_id, **item_data))
+
+        db.session.commit() # Commit equipment and inventory to get their IDs
+        print("Committed equipment and inventory.")
+
+        # Re-build maps for newly created equipment and inventory
+        equipment_map = {eq.equipment_id: eq for eq in Equipment.query.filter_by(company_id=company_id).all()}
+
+        # Re-insert Work Orders (most dependent model)
+        for wo_data in data_to_restore.get('work_orders', []):
+            equipment_id = wo_data.pop('equipment', None)
+            location_name = wo_data.pop('location', None)
+            created_by_username = wo_data.pop('created_by', None)
+            assigned_user_username = wo_data.pop('assigned_user', None)
+            assigned_team_name = wo_data.pop('assigned_team', None) # Assuming you add this to backup
+
+            wo_data['equipment_id'] = equipment_map.get(equipment_id).id if equipment_id in equipment_map else None
+            wo_data['location_id'] = locations_map.get(location_name).id if location_name in locations_map else None
+            wo_data['created_by_id'] = users_map.get(created_by_username).id if created_by_username in users_map else None
+            wo_data['assigned_to_user_id'] = users_map.get(assigned_user_username).id if assigned_user_username in users_map else None
+            # wo_data['assigned_to_team_id'] = ... # Logic to find team by name
+            
+            db.session.add(WorkOrder(company_id=company_id, **wo_data))
+        
+        db.session.commit()
+        print("Restore complete.")
+        
+        flash('Data restore successful. Your company data has been overwritten with the backup file.', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'A critical error occurred during the restore process: {e}. Your data has NOT been changed.', 'danger')
+        print(f"Error in restore_data: {e}")
+
+    return redirect(url_for('system_settings'))
 
 # --- MIDDLEWARE FOR FORCING PASSWORD CHANGE ---
 
@@ -545,6 +942,25 @@ def flash(message, category='message'):
 
     # Call the original Flask flash function
     flask_flash(message, category)
+    
+# --- CONTEXT PROCESSOR FOR TEMPLATES ---
+
+@app.context_processor
+def inject_permissions():
+    """
+    Injects a 'has_permission' function into the template context
+    so it can be used in any Jinja template.
+    """
+    def has_permission(permission_name):
+        # Always return True for Admins, they can do everything
+        if current_user.is_authenticated and current_user.role and current_user.role.is_admin:
+            return True
+        # Check for a specific permission in the user's role
+        if current_user.is_authenticated and current_user.role and current_user.role.permissions:
+            return permission_name in [p.name for p in current_user.role.permissions]
+        return False
+        
+    return dict(has_permission=has_permission)
         
 # --- ROLE MANAGEMENT ROUTES ---
 
@@ -579,25 +995,50 @@ def manage_roles():
 @permission_required('CAN_MANAGE_ROLES')
 def edit_role(role_id):
     role = Role.query.get_or_404(role_id)
-    if role.company_id != current_user.company_id:
-        abort(403)
-    if role.is_admin:
-        flash('The default Admin role cannot be modified.', 'warning')
+    if role.company_id != current_user.company_id or role.is_admin:
+        flash('This role cannot be modified.', 'warning')
         return redirect(url_for('manage_roles'))
 
     if request.method == 'POST':
         role.name = request.form.get('name')
         role.description = request.form.get('description')
-        
         selected_permission_ids = request.form.getlist('permissions')
         role.permissions = Permission.query.filter(Permission.id.in_(selected_permission_ids)).all()
-        
         db.session.commit()
         flash(f'Role "{role.name}" has been updated.', 'success')
         return redirect(url_for('manage_roles'))
 
-    all_permissions = Permission.query.all()
-    return render_template('roles/edit_role.html', role=role, all_permissions=all_permissions)
+    # --- THIS IS THE NEW LOGIC ---
+    # Group all available permissions by a category prefix
+    all_permissions = Permission.query.order_by(Permission.name).all()
+    grouped_permissions = {
+        'General': [],
+        'Users & Teams': [],
+        'Work Orders': [],
+        'Assets': [],
+        'Vendors': [],
+        'Company Data': [],
+        'System & Reporting': [],
+    }
+    
+    for perm in all_permissions:
+        if 'USER' in perm.name or 'ROLE' in perm.name or 'TEAM' in perm.name:
+            grouped_permissions['Users & Teams'].append(perm)
+        elif 'WORK_ORDER' in perm.name:
+            grouped_permissions['Work Orders'].append(perm)
+        elif 'EQUIPMENT' in perm.name or 'INVENTORY' in perm.name or 'ASSET' in perm.name:
+            grouped_permissions['Assets'].append(perm)
+        elif 'VENDOR' in perm.name:
+            grouped_permissions['Vendors'].append(perm)
+        elif any(p in perm.name for p in ['CATEGORIES', 'DEPARTMENTS', 'LOCATIONS', 'UNITS', 'CURRENCIES']):
+            grouped_permissions['Company Data'].append(perm)
+        elif any(p in perm.name for p in ['REPORT', 'SETTING', 'BROADCAST']):
+            grouped_permissions['System & Reporting'].append(perm)
+        else: # Fallback for general permissions like CAN_VIEW_DASHBOARD
+            grouped_permissions['General'].append(perm)
+    # --- END OF NEW LOGIC ---
+
+    return render_template('roles/edit_role.html', role=role, grouped_permissions=grouped_permissions)
 
 # --- USER MANAGEMENT ROUTES ---
 
@@ -718,21 +1159,31 @@ def add_user():
         email = request.form.get('email', '').strip()
         role_id = request.form.get('role_id')
 
-        # --- Validation ---
+        # --- 1. Basic Form Validation ---
         if not all([first_name, email, role_id]):
             flash('First Name, Email, and Role are required fields.', 'danger')
             return render_template('users/form.html', form_data=form_data, user=None)
         
-        # Check for unique email within the current user's company
+        # --- 2. User Limit Check ---
+        # Get the current number of users in the company
+        user_count = User.query.filter_by(company_id=current_user.company_id).count()
+        # Get the user limit from the company object
+        user_limit = current_user.company.user_limit
+
+        if user_count >= user_limit:
+            flash(f'You have reached your company\'s limit of {user_limit} users. Please contact support to upgrade your plan.', 'danger')
+            return render_template('users/form.html', form_data=form_data, user=None)
+        
+        # --- 3. Data Uniqueness Validation ---
         if User.query.filter_by(company_id=current_user.company_id, email=email).first():
             flash(f'A user with the email "{email}" already exists in this company.', 'warning')
             return render_template('users/form.html', form_data=form_data, user=None)
 
-        # --- Generate Data ---
+        # --- 4. Generate Data ---
         username = generate_unique_username(first_name, current_user.company_id)
         password = generate_random_password()
 
-        # --- Create User Object ---
+        # --- 5. Create and Save User Object ---
         try:
             new_user = User(
                 company_id=current_user.company_id,
@@ -753,7 +1204,6 @@ def add_user():
             # --- Success Feedback ---
             flash(f'User "{first_name}" created successfully! Provide them with their credentials below.', 'success')
             flash(f'Username: {username}', 'info')
-            # Flash a tuple: (password, new_user_id) with a special category
             flash((password, new_user.id), 'credentials')
             
             return redirect(url_for('manage_users'))
@@ -762,12 +1212,14 @@ def add_user():
             db.session.rollback()
             flash(f'An error occurred while creating the user: {e}', 'danger')
 
+    # For a GET request
     return render_template('users/form.html', form_data=form_data, user=None)
 
 @app.route('/users/bulk-import', methods=['POST'])
 @login_required
 @permission_required('CAN_MANAGE_USERS')
 def bulk_import_users():
+    # --- 1. File Handling and Validation ---
     if 'csv_file' not in request.files:
         flash('No file part in the request.', 'danger')
         return redirect(url_for('add_user'))
@@ -777,20 +1229,43 @@ def bulk_import_users():
         flash('Please select a valid .csv file to upload.', 'danger')
         return redirect(url_for('add_user'))
 
+    # --- 2. User Limit Check for Bulk Action ---
+    try:
+        # Read the file content into memory to count the rows first
+        file_content = file.stream.read().decode("UTF8")
+        stream = io.StringIO(file_content, newline=None)
+        
+        # Count the number of data rows in the CSV (subtract 1 for the header)
+        num_new_users = len(file_content.strip().split('\n')) - 1
+        
+        if num_new_users <= 0:
+            flash('The uploaded CSV file is empty or contains no data rows.', 'warning')
+            return redirect(url_for('add_user'))
+
+        user_count = User.query.filter_by(company_id=current_user.company_id).count()
+        user_limit = current_user.company.user_limit
+
+        if (user_count + num_new_users) > user_limit:
+            flash(f'Import failed: You currently have {user_count} of {user_limit} users. Importing {num_new_users} new users would exceed your limit.', 'danger')
+            return redirect(url_for('add_user'))
+
+        # Reset the stream to be read by DictReader after counting
+        stream.seek(0)
+        csv_reader = csv.DictReader(stream)
+    except Exception as e:
+        flash(f'Error reading CSV file: {e}', 'danger')
+        return redirect(url_for('add_user'))
+        
+    # --- 3. CSV Parsing and User Creation ---
     created_count = 0
     error_count = 0
-    
-    # --- THIS IS NEW: Store credentials for the download ---
     new_user_credentials = []
 
     try:
-        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-        csv_reader = csv.DictReader(stream)
-
         company_roles = {role.name.lower(): role for role in Role.query.filter_by(company_id=current_user.company_id).all()}
         company_depts = {dept.name.lower(): dept for dept in Department.query.filter_by(company_id=current_user.company_id).all()}
 
-        for row_num, row in enumerate(csv_reader, 2): # Start from line 2 for error reporting
+        for row_num, row in enumerate(csv_reader, 2):
             first_name = row.get('FirstName', '').strip()
             email = row.get('Email', '').strip()
             role_name = row.get('Role', '').strip()
@@ -833,7 +1308,6 @@ def bulk_import_users():
             db.session.add(new_user)
             created_count += 1
             
-            # --- ADD TO OUR CREDENTIALS LIST ---
             new_user_credentials.append({
                 'FirstName': first_name,
                 'LastName': row.get('LastName', '').strip(),
@@ -849,18 +1323,17 @@ def bulk_import_users():
         flash(f'A critical error occurred during the import process: {e}', 'danger')
         return redirect(url_for('add_user'))
 
-    # --- 2. Generate and Serve the Credentials File ---
+    # --- 4. Generate and Serve the Credentials File or Show Errors ---
     if created_count > 0:
         flash(f'Successfully imported {created_count} new users. Please download the credentials file.', 'success')
-        
-        # Create a new CSV in memory for the output
+        if error_count > 0:
+            flash(f'Skipped {error_count} rows due to errors or existing data. Please check warnings.', 'warning')
+
         output = io.StringIO()
         fieldnames = ['FirstName', 'LastName', 'Email', 'Username', 'Password']
         writer = csv.DictWriter(output, fieldnames=fieldnames)
-        
         writer.writeheader()
         writer.writerows(new_user_credentials)
-        
         output.seek(0)
         
         return Response(
@@ -869,9 +1342,9 @@ def bulk_import_users():
             headers={"Content-Disposition": f"attachment;filename=new_user_credentials_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.csv"}
         )
     
-    # If only errors occurred, just redirect with the error messages
     if error_count > 0:
         flash(f'Import failed. Skipped {error_count} rows due to errors. Please check warnings and try again.', 'danger')
+        return redirect(url_for('add_user'))
 
     return redirect(url_for('manage_users'))
 
@@ -1577,6 +2050,16 @@ def delete_location(loc_id):
 
 # --- EQUIPMENT MANAGEMENT ROUTES ---
 
+def get_form_data():
+    """Helper to fetch data for the equipment form dropdowns."""
+    company_id = current_user.company_id
+    return {
+        'categories': Category.query.filter_by(company_id=company_id, is_active=True).all(),
+        'locations': Location.query.filter_by(company_id=company_id, is_active=True).all(),
+        'departments': Department.query.filter_by(company_id=company_id, is_active=True).all(),
+        'vendors': Vendor.query.filter_by(company_id=company_id).order_by(Vendor.name).all() # <-- ADD THIS LINE
+    }
+
 @app.route('/equipment')
 @login_required
 @permission_required('CAN_MANAGE_EQUIPMENT')
@@ -1613,19 +2096,9 @@ def manage_equipment():
         search_query=search_query
     )
 
-def get_form_data():
-    """Helper to fetch data for the equipment form dropdowns."""
-    company_id = current_user.company_id
-    return {
-        'categories': Category.query.filter_by(company_id=company_id, is_active=True).all(),
-        'locations': Location.query.filter_by(company_id=company_id, is_active=True).all(),
-        'departments': Department.query.filter_by(company_id=company_id, is_active=True).all(),
-        'vendors': Vendor.query.filter_by(company_id=company_id).order_by(Vendor.name).all() # <-- ADD THIS LINE
-    }
-
 @app.route('/equipment/add', methods=['GET', 'POST'])
 @login_required
-@permission_required('CAN_MANAGE_EQUIPMENT')
+@permission_required('CAN_ADD_EQUIPMENT')
 def add_equipment():
     if request.method == 'POST':
         # --- Form Data Validation ---
@@ -1666,10 +2139,10 @@ def add_equipment():
             saved_files, save_actions = process_uploads(new_equip, request.files, 'equipment')
             
             # Update the object with the lists of filenames (or None if empty)
-            new_equip.images = saved_files['images'] or None
-            new_equip.videos = saved_files['videos'] or None
-            new_equip.audio_files = saved_files['audio_files'] or None
-            new_equip.documents = saved_files['documents'] or None
+            new_equip.images = saved_files['images'] or []
+            new_equip.videos = saved_files['videos'] or []
+            new_equip.audio_files = saved_files['audio_files'] or []
+            new_equip.documents = saved_files['documents'] or []
 
             # --- Transactional Step 1: Commit to Database ---
             # If this fails, the 'except' block will be triggered and no files will be saved.
@@ -1696,7 +2169,7 @@ def add_equipment():
 
 @app.route('/equipment/view/<int:equip_id>')
 @login_required
-@permission_required('CAN_MANAGE_EQUIPMENT') # Or a new 'CAN_VIEW_EQUIPMENT' permission if you prefer
+@permission_required('CAN_VIEW_EQUIPMENT') # Or a new 'CAN_VIEW_EQUIPMENT' permission if you prefer
 def view_equipment(equip_id):
     equipment = Equipment.query.options(
         joinedload(Equipment.category),
@@ -1712,7 +2185,7 @@ def view_equipment(equip_id):
 
 @app.route('/equipment/edit/<int:equip_id>', methods=['GET', 'POST'])
 @login_required
-@permission_required('CAN_MANAGE_EQUIPMENT')
+@permission_required('CAN_EDIT_EQUIPMENT')
 def edit_equipment(equip_id):
     equipment = Equipment.query.get_or_404(equip_id)
     if equipment.company_id != current_user.company_id:
@@ -1772,7 +2245,7 @@ def edit_equipment(equip_id):
 
 @app.route('/equipment/delete/<int:equip_id>', methods=['POST'])
 @login_required
-@permission_required('CAN_MANAGE_EQUIPMENT')
+@permission_required('CAN_DELETE_EQUIPMENT')
 def delete_equipment(equip_id):
     # Retrieve the equipment or return a 404 error if not found
     equipment = Equipment.query.get_or_404(equip_id)
@@ -1809,7 +2282,7 @@ def delete_equipment(equip_id):
 
 @app.route('/equipment/<int:equip_id>/delete-media', methods=['POST'])
 @login_required
-@permission_required('CAN_MANAGE_EQUIPMENT')
+@permission_required('CAN_EDIT_EQUIPMENT')
 def delete_equipment_media(equip_id):
     equipment = Equipment.query.get_or_404(equip_id)
     if equipment.company_id != current_user.company_id:
@@ -2304,7 +2777,7 @@ def manage_inventory():
 
 @app.route('/inventory/view/<int:item_id>')
 @login_required
-@permission_required('CAN_MANAGE_INVENTORY')
+@permission_required('CAN_VIEW_INVENTORY')
 def view_inventory_item(item_id):
     # Eagerly load all related data, including the direct manufacturer and supplier relationships
     item = InventoryItem.query.options(
@@ -2327,7 +2800,7 @@ def view_inventory_item(item_id):
 
 @app.route('/inventory/add', methods=['GET', 'POST'])
 @login_required
-@permission_required('CAN_MANAGE_INVENTORY')
+@permission_required('CAN_ADD_INVENTORY')
 def add_inventory_item():
     if request.method == 'POST':
         if not all([request.form.get('name'), request.form.get('category_id'), request.form.get('minimum_stock')]):
@@ -2356,10 +2829,10 @@ def add_inventory_item():
         try:
             db.session.flush()
             saved_files, save_actions = process_uploads(new_item, request.files, 'inventory')
-            new_item.images = saved_files['images'] or None
-            new_item.videos = saved_files['videos'] or None
-            new_item.audio_files = saved_files['audio_files'] or None
-            new_item.documents = saved_files['documents'] or None
+            new_item.images = saved_files['images'] or []
+            new_item.videos = saved_files['videos'] or []
+            new_item.audio_files = saved_files['audio_files'] or []
+            new_item.documents = saved_files['documents'] or []
             db.session.commit()
             for file, save_path in save_actions:
                 file.save(save_path)
@@ -2374,7 +2847,7 @@ def add_inventory_item():
 
 @app.route('/inventory/edit/<int:item_id>', methods=['GET', 'POST'])
 @login_required
-@permission_required('CAN_MANAGE_INVENTORY')
+@permission_required('CAN_EDIT_INVENTORY')
 def edit_inventory_item(item_id):
     item = InventoryItem.query.get_or_404(item_id)
     if item.company_id != current_user.company_id:
@@ -2426,7 +2899,7 @@ def edit_inventory_item(item_id):
 
 @app.route('/inventory/delete/<int:item_id>', methods=['POST'])
 @login_required
-@permission_required('CAN_MANAGE_INVENTORY')
+@permission_required('CAN_DELETE_INVENTORY')
 def delete_inventory_item(item_id):
     item = InventoryItem.query.get_or_404(item_id)
     if item.company_id != current_user.company_id:
@@ -2447,7 +2920,7 @@ def delete_inventory_item(item_id):
 
 @app.route('/inventory/<int:item_id>/delete-media', methods=['POST'])
 @login_required
-@permission_required('CAN_MANAGE_INVENTORY')
+@permission_required('CAN_EDIT_INVENTORY')
 def delete_inventory_media(item_id):
     item = InventoryItem.query.get_or_404(item_id)
     if item.company_id != current_user.company_id:
@@ -2559,7 +3032,7 @@ def manage_vendors():
     
 @app.route('/vendors/view/<int:vendor_id>')
 @login_required
-@permission_required('CAN_MANAGE_VENDORS')
+@permission_required('CAN_VIEW_VENDORS')
 def view_vendor(vendor_id):
     # Eagerly load the relationships that still exist on the Vendor model
     vendor = Vendor.query.options(
@@ -2592,7 +3065,7 @@ def view_vendor(vendor_id):
 
 @app.route('/vendors/add', methods=['GET', 'POST'])
 @login_required
-@permission_required('CAN_MANAGE_VENDORS')
+@permission_required('CAN_ADD_VENDORS')
 def add_vendor():
     if request.method == 'POST':
         # --- 1. Basic Validation ---
@@ -2657,10 +3130,10 @@ def add_vendor():
 
             # --- 5. Handle Media Uploads ---
             saved_files, save_actions = process_uploads(new_vendor, request.files, 'vendors')
-            new_vendor.images = saved_files['images'] or None
-            new_vendor.videos = saved_files['videos'] or None
-            new_vendor.audio_files = saved_files['audio_files'] or None
-            new_vendor.documents = saved_files['documents'] or None
+            new_vendor.images = saved_files['images'] or []
+            new_vendor.videos = saved_files['videos'] or []
+            new_vendor.audio_files = saved_files['audio_files'] or []
+            new_vendor.documents = saved_files['documents'] or []
             
             # --- 6. Commit and Save Files ---
             db.session.commit()
@@ -2680,7 +3153,7 @@ def add_vendor():
 
 @app.route('/vendors/edit/<int:vendor_id>', methods=['GET', 'POST'])
 @login_required
-@permission_required('CAN_MANAGE_VENDORS')
+@permission_required('CAN_EDIT_VENDORS')
 def edit_vendor(vendor_id):
     # Eagerly load contacts for the form to prevent N+1 queries
     vendor = Vendor.query.options(
@@ -2781,7 +3254,7 @@ def edit_vendor(vendor_id):
 
 @app.route('/vendors/delete/<int:vendor_id>', methods=['POST'])
 @login_required
-@permission_required('CAN_MANAGE_VENDORS')
+@permission_required('CAN_DELETE_VENDORS')
 def delete_vendor(vendor_id):
     vendor = Vendor.query.get_or_404(vendor_id)
     if vendor.company_id != current_user.company_id:
@@ -2795,7 +3268,7 @@ def delete_vendor(vendor_id):
 
 @app.route('/vendors/<int:vendor_id>/delete-media', methods=['POST'])
 @login_required
-@permission_required('CAN_MANAGE_VENDORS')
+@permission_required('CAN_EDIT_VENDORS')
 def delete_vendor_media(vendor_id):
     vendor = Vendor.query.get_or_404(vendor_id)
     if vendor.company_id != current_user.company_id:
@@ -3173,10 +3646,10 @@ def add_work_order():
             db.session.flush() # Get the new_wo.id for file naming
             # --- 4. Handle Media Uploads (using our generic helper) ---
             saved_files, save_actions = process_uploads(new_wo, request.files, 'work_orders')
-            new_wo.images = saved_files['images'] or None
-            new_wo.videos = saved_files['videos'] or None
-            new_wo.audio_files = saved_files['audio_files'] or None
-            new_wo.documents = saved_files['documents'] or None
+            new_wo.images = saved_files['images'] or []
+            new_wo.videos = saved_files['videos'] or []
+            new_wo.audio_files = saved_files['audio_files'] or []
+            new_wo.documents = saved_files['documents'] or []
             
             # --- 5. Commit and Save ---
             db.session.commit()
@@ -3202,17 +3675,25 @@ def add_work_order():
 
 @app.route('/work-orders/edit/<int:wo_id>', methods=['GET', 'POST'])
 @login_required
-@permission_required('CAN_EDIT_WORK_ORDER') # Base permission
+@permission_required('CAN_EDIT_WORK_ORDER') # Base permission to access the page
 def edit_work_order(wo_id):
-    wo = WorkOrder.query.get_or_404(wo_id)
+    # Eagerly load relationships to pre-fill the form efficiently
+    work_order = WorkOrder.query.options(
+        joinedload(WorkOrder.equipment),
+        joinedload(WorkOrder.location),
+        joinedload(WorkOrder.created_by),
+        joinedload(WorkOrder.assigned_user),
+        joinedload(WorkOrder.assigned_team)
+    ).get_or_404(wo_id)
     
     # --- Security & Permission Checks ---
-    if wo.company_id != current_user.company_id:
+    if work_order.company_id != current_user.company_id:
         abort(403)
     
     can_manage = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in [p.name for p in current_user.role.permissions]
-    is_creator = wo.created_by_id == current_user.id
+    is_creator = work_order.created_by_id == current_user.id
 
+    # A user can only edit if they are a manager/admin OR they are the original creator
     if not can_manage and not is_creator:
         flash('You do not have permission to edit this work order.', 'danger')
         return redirect(url_for('manage_work_orders'))
@@ -3220,54 +3701,57 @@ def edit_work_order(wo_id):
     if request.method == 'POST':
         save_actions = []
         try:
-            # --- Update Fields ---
-            wo.title = request.form.get('title')
-            wo.priority = request.form.get('priority')
-            # ... (update all other fields from the form) ...
-            wo.equipment_id = request.form.get('equipment_id')
-            wo.location_id = request.form.get('location_id') or None
-            wo.work_order_type = request.form.get('work_order_type')
-            wo.description = request.form.get('description')
-            wo.assigned_to_user_id = request.form.get('assigned_to_user_id') or None
-            wo.assigned_to_team_id = request.form.get('assigned_to_team_id') or None
-            wo.scheduled_date = request.form.get('scheduled_date') or None
-            wo.due_date = request.form.get('due_date') or None
-            wo.estimated_duration = request.form.get('estimated_duration') or None
+            # --- 1. Update Standard Fields ---
+            work_order.title = request.form.get('title')
+            work_order.priority = request.form.get('priority')
+            work_order.equipment_id = request.form.get('equipment_id')
+            work_order.location_id = request.form.get('location_id') or None
+            work_order.work_order_type = request.form.get('work_order_type')
+            work_order.description = request.form.get('description')
+            work_order.assigned_to_user_id = request.form.get('assigned_to_user_id') or None
+            work_order.assigned_to_team_id = request.form.get('assigned_to_team_id') or None
+            scheduled_str = request.form.get('scheduled_date')
+            work_order.scheduled_date = datetime.strptime(scheduled_str, '%Y-%m-%d') if scheduled_str else None
+            due_str = request.form.get('due_date')
+            work_order.due_date = datetime.strptime(due_str, '%Y-%m-%d') if due_str else None
+            work_order.estimated_duration = request.form.get('estimated_duration') or None
             
-            # --- RE-APPROVAL LOGIC ---
-            # If the user is NOT a manager/admin, any edit reverts the status to 'On Hold'
+            # --- 2. RE-APPROVAL LOGIC ---
+            # If the user making the edit is NOT a manager/admin...
             if not can_manage:
-                wo.status = 'On Hold'
-                wo.is_approved = False
+                # ...then the work order status must revert to 'On Hold' for re-approval.
+                work_order.status = 'On Hold'
+                work_order.is_approved = False
                 flash('Your changes have been submitted for re-approval.', 'info')
-                # Send a notification to the approvers
-                send_approval_request_email(wo)
+                # Send a notification email to the approvers
+                send_approval_request_email(work_order)
             
-            # --- Handle Media Uploads ---
-            # This logic for appending and flagging is from your equipment edit route
-            saved_files, save_actions = process_uploads(wo, request.files, 'work_orders')
-            if saved_files['images']: wo.images = (wo.images or []) + saved_files['images']
-            if saved_files['videos']: wo.videos = (wo.videos or []) + saved_files['videos']
-            if saved_files['audio_files']: wo.audio_files = (wo.audio_files or []) + saved_files['audio_files']
-            if saved_files['documents']: wo.documents = (wo.documents or []) + saved_files['documents']
-            flag_modified(wo, "images"); flag_modified(wo, "videos");
-            flag_modified(wo, "audio_files"); flag_modified(wo, "documents");
+            # --- 3. Handle New Media Uploads ---
+            saved_files, save_actions = process_uploads(work_order, request.files, 'work_orders')
+            if saved_files['images']: work_order.images = (work_order.images or []) + saved_files['images']
+            if saved_files['videos']: work_order.videos = (work_order.videos or []) + saved_files['videos']
+            if saved_files['audio_files']: work_order.audio_files = (work_order.audio_files or []) + saved_files['audio_files']
+            if saved_files['documents']: work_order.documents = (work_order.documents or []) + saved_files['documents']
+            
+            flag_modified(work_order, "images"); flag_modified(work_order, "videos");
+            flag_modified(work_order, "audio_files"); flag_modified(work_order, "documents");
 
-            # --- Commit and Save ---
+            # --- 4. Commit to DB, then Save Files ---
             db.session.commit()
             for file, path in save_actions:
                 file.save(path)
                 
-            flash(f'Work Order #{wo.id} updated successfully.', 'success')
+            flash(f'Work Order #{work_order.id} updated successfully.', 'success')
 
         except Exception as e:
             db.session.rollback()
-            flash(f'An error occurred: {e}', 'danger')
+            flash(f'An error occurred while updating the work order: {e}', 'danger')
+            print(f"Error in edit_work_order: {e}") # For debugging
             
         return redirect(url_for('manage_work_orders'))
 
     # For a GET request, reuse the add form template, passing the existing WO data
-    return render_template('work_orders/form.html', form_data=get_work_order_form_data(), wo=wo)
+    return render_template('work_orders/form.html', form_data=get_work_order_form_data(), wo=work_order)
 
 @app.route('/work-orders/approve/<int:wo_id>', methods=['POST'])
 @login_required
@@ -3628,6 +4112,118 @@ def notification_logs():
     # db.session.commit()
 
     return render_template('notifications/index.html', logs=logs)
+
+# --- REPORTS & ANALYTICS ROUTES ---
+
+@app.route('/performance/technicians')
+@login_required
+@permission_required('CAN_VIEW_REPORTS') # Protect this page with a suitable permission
+def technician_performance():
+    company_id = current_user.company_id
+    
+    # --- 1. Fetch all non-admin users (technicians) for the company ---
+    technicians = User.query.join(Role).filter(
+        User.company_id == company_id,
+        Role.name == 'Technician'
+    ).all()
+
+    technician_stats = []
+    total_completed = 0
+    total_on_time = 0
+
+    # --- 2. Calculate stats for each technician ---
+    for tech in technicians:
+        # Get all WOs assigned to this technician
+        assigned_wos = WorkOrder.query.filter_by(assigned_to_user_id=tech.id).all()
+        
+        # Filter for completed WOs
+        completed_wos = [wo for wo in assigned_wos if wo.status == 'Completed']
+        # Filter for on-time WOs (completed before or on the due date)
+        on_time_wos = [wo for wo in completed_wos if wo.completed_at and wo.due_date and wo.completed_at.date() <= wo.due_date.date()]
+        
+        total_tasks = len(assigned_wos)
+        completed_tasks = len(completed_wos)
+        on_time_tasks = len(on_time_wos)
+        
+        # Calculate rates, avoiding division by zero
+        completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+        on_time_rate = (on_time_tasks / completed_tasks * 100) if completed_tasks > 0 else 0
+        
+        # A simple performance score (can be made more complex)
+        performance_score = (completion_rate * 0.6) + (on_time_rate * 0.4)
+        
+        total_completed += completed_tasks
+        total_on_time += on_time_tasks
+
+        technician_stats.append({
+            'user': tech,
+            'status': 'Active' if tech.is_active else 'Inactive',
+            'team': tech.teams[0].name if tech.teams else 'N/A', # Assumes user is in one team
+            'total_tasks': total_tasks,
+            'completed': completed_tasks,
+            'on_time': on_time_tasks,
+            'completion_rate': completion_rate,
+            'on_time_rate': on_time_rate,
+            'performance_score': performance_score
+        })
+
+    # --- 3. Calculate overall stats for the cards ---
+    total_technicians = len(technicians)
+    all_assigned_wos = WorkOrder.query.filter(WorkOrder.company_id == company_id, WorkOrder.assigned_to_user_id.isnot(None)).all()
+    
+    avg_completion_rate = (total_completed / len(all_assigned_wos) * 100) if all_assigned_wos else 0
+    avg_on_time_rate = (total_on_time / total_completed * 100) if total_completed > 0 else 0
+    active_tasks = WorkOrder.query.filter(
+        WorkOrder.company_id == company_id,
+        WorkOrder.status.in_(['Open', 'In Progress'])
+    ).count()
+    
+    overall_stats = {
+        'total_technicians': total_technicians,
+        'avg_completion_rate': avg_completion_rate,
+        'avg_on_time_rate': avg_on_time_rate,
+        'active_tasks': active_tasks
+    }
+
+    # --- 4. Get Team Stats ---
+    team_stats = []
+    # Eagerly load members to get the count and their IDs efficiently
+    teams = Team.query.options(joinedload(Team.members)).filter_by(company_id=company_id).all()
+
+    for team in teams:
+        # Get a list of all member IDs for this team
+        member_ids = [member.id for member in team.members]
+        
+        if not member_ids:
+            # If a team has no members, its stats are all zero
+            team_stats.append({
+                'team': team,
+                'members': 0,
+                'tasks_completed': 0,
+                'total_tasks': 0
+            })
+            continue
+
+        # Query for all WOs assigned to ANY member of this team
+        team_wos = WorkOrder.query.filter(WorkOrder.assigned_to_user_id.in_(member_ids)).all()
+        
+        # Calculate stats based on this collective list of work orders
+        total_team_tasks = len(team_wos)
+        completed_team_tasks = len([wo for wo in team_wos if wo.status == 'Completed'])
+
+        team_stats.append({
+            'team': team,
+            'members': len(member_ids),
+            'tasks_completed': completed_team_tasks,
+            'total_tasks': total_team_tasks
+        })
+
+    return render_template(
+        'performance/technicians.html',
+        overall_stats=overall_stats,
+        technician_stats=technician_stats,
+        team_stats=team_stats
+    )
 
 # --- SUPERADMIN ROUTES ---
 

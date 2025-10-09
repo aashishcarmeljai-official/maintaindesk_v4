@@ -7,94 +7,98 @@
         </a>
         <ul class="sidebar-nav">
             <!-- Main Navigation -->
+            {% if has_permission('CAN_VIEW_DASHBOARD') %}
             <li class="sidebar-item {% if request.endpoint == 'index' %}active{% endif %}">
-                <a class="sidebar-link" href="{{ url_for('index') }}">
-                    <i class="bi bi-grid-fill"></i>
-                    <span>Dashboard</span>
-                </a>
+                <a class="sidebar-link" href="{{ url_for('index') }}"><i class="bi bi-grid-fill"></i><span>Dashboard</span></a>
             </li>
-            {% set wo_endpoints = ['manage_work_orders', 'add_work_order'] %}
+            {% endif %}
+
+            {% if has_permission('CAN_CREATE_WORK_ORDER') %}
+            {% set wo_endpoints = ['manage_work_orders', 'add_work_order', 'edit_work_order', 'view_work_order'] %}
             <li class="sidebar-item {% if request.endpoint in wo_endpoints %}active{% endif %}">
-                <a class="sidebar-link" href="{{ url_for('manage_work_orders') }}">
-                    <i class="bi bi-wrench-adjustable-circle"></i>
-                    <span>Work Orders</span>
-                </a>
+                <a class="sidebar-link" href="{{ url_for('manage_work_orders') }}"><i class="bi bi-wrench-adjustable-circle"></i><span>Work Orders</span></a>
             </li>
+            {% endif %}
             
             <!-- Assets Dropdown -->
+            {% if has_permission('CAN_MANAGE_ASSETS') %}
             {% set assets_endpoints = ['manage_equipment', 'add_equipment', 'edit_equipment', 'view_equipment', 'manage_inventory', 'add_inventory_item', 'edit_inventory_item', 'view_inventory_item'] %}
             <li class="sidebar-item {% if request.endpoint in assets_endpoints %}active{% endif %}">
                 <a class="sidebar-link {{ '' if request.endpoint in assets_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#assetsCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in assets_endpoints else 'false' }}" aria-controls="assetsCollapse">
-                    <i class="bi bi-box-seam"></i>
-                    <span>Assets</span>
-                    <i class="bi bi-chevron-down ms-auto"></i>
+                    <i class="bi bi-box-seam"></i><span>Assets</span><i class="bi bi-chevron-down ms-auto"></i>
                 </a>
                 <div class="collapse {{ 'show' if request.endpoint in assets_endpoints }}" id="assetsCollapse">
                     <ul class="sidebar-submenu">
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_equipment', 'add_equipment', 'edit_equipment', 'view_equipment'] %}active{% endif %}">
-                            <a href="{{ url_for('manage_equipment') }}" class="sidebar-link">Equipment</a>
-                        </li>   
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_inventory', 'add_inventory_item', 'edit_inventory_item', 'view_inventory_item'] %}active{% endif %}">
-                            <a href="{{ url_for('manage_inventory') }}" class="sidebar-link">Inventory</a>
-                        </li>
+                        {% if has_permission('CAN_MANAGE_EQUIPMENT') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_equipment', 'add_equipment', 'edit_equipment', 'view_equipment'] %}active{% endif %}"><a href="{{ url_for('manage_equipment') }}" class="sidebar-link">Equipment</a></li>
+                        {% endif %}
+                        {% if has_permission('CAN_MANAGE_INVENTORY') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_inventory', 'add_inventory_item', 'edit_inventory_item', 'view_inventory_item'] %}active{% endif %}"><a href="{{ url_for('manage_inventory') }}" class="sidebar-link">Inventory</a></li>
+                        {% endif %}
                     </ul>
                 </div>
             </li>
+            {% endif %}
 
             <!-- Users & Company Management -->
-            {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'manage_roles', 'edit_role', 'create_role', 'manage_teams', 'add_team', 'edit_team'] %}
+            {% if has_permission('CAN_MANAGE_USERS') or has_permission('CAN_MANAGE_TEAMS') or has_permission('CAN_MANAGE_ROLES') %}
+            {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'invite_user', 'manage_roles', 'edit_role', 'create_role', 'manage_teams', 'add_team', 'edit_team'] %}
             <li class="sidebar-item {% if request.endpoint in users_teams_endpoints %}active{% endif %}">
                 <a class="sidebar-link {{ '' if request.endpoint in users_teams_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#usersCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in users_teams_endpoints else 'false' }}" aria-controls="usersCollapse">
-                    <i class="bi bi-people-fill"></i>
-                    <span>Users / Teams</span>
-                    <i class="bi bi-chevron-down ms-auto"></i>
+                    <i class="bi bi-people-fill"></i><span>Users / Teams</span><i class="bi bi-chevron-down ms-auto"></i>
                 </a>
                 <div class="collapse {{ 'show' if request.endpoint in users_teams_endpoints }}" id="usersCollapse">
                     <ul class="sidebar-submenu">
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_users', 'add_user', 'edit_user'] %}active{% endif %}">
-                            <a href="{{ url_for('manage_users') }}" class="sidebar-link">Users</a>
-                        </li>
-                        {% set team_endpoints = ['manage_teams', 'add_team', 'edit_team'] %}
-                        <li class="sidebar-submenu-item {% if request.endpoint in team_endpoints %}active{% endif %}">
-                            <a href="{{ url_for('manage_teams') }}" class="sidebar-link">Teams</a>
-                        </li>
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_roles', 'edit_role', 'create_role'] %}active{% endif %}">
-                            <a href="{{ url_for('manage_roles') }}" class="sidebar-link">Roles</a>
-                        </li>
+                        {% if has_permission('CAN_MANAGE_USERS') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_users', 'add_user', 'edit_user', 'invite_user'] %}active{% endif %}"><a href="{{ url_for('manage_users') }}" class="sidebar-link">Users</a></li>
+                        {% endif %}
+                        {% if has_permission('CAN_MANAGE_TEAMS') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_teams', 'add_team', 'edit_team'] %}active{% endif %}"><a href="{{ url_for('manage_teams') }}" class="sidebar-link">Teams</a></li>
+                        {% endif %}
+                        {% if has_permission('CAN_MANAGE_ROLES') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_roles', 'edit_role', 'create_role'] %}active{% endif %}"><a href="{{ url_for('manage_roles') }}" class="sidebar-link">Roles</a></li>
+                        {% endif %}
                     </ul>
                 </div>
             </li>
+            {% endif %}
             
             <!-- Other Main Links -->
-            {% set department_endpoints = ['manage_departments'] %}
-            <li class="sidebar-item {% if request.endpoint in department_endpoints %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_departments') }}"><i class="bi bi-building"></i><span>Departments</span></a></li>
-            {% set vendor_endpoints = ['manage_vendors', 'add_vendor', 'edit_vendor', 'view_vendor'] %}
-            <li class="sidebar-item {% if request.endpoint in vendor_endpoints %}active{% endif %}">
-                <a class="sidebar-link" href="{{ url_for('manage_vendors') }}"><i class="bi bi-person-rolodex"></i><span>Vendors</span></a>
+            {% if has_permission('CAN_MANAGE_DEPARTMENTS') %}<li class="sidebar-item {% if request.endpoint == 'manage_departments' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_departments') }}"><i class="bi bi-building"></i><span>Departments</span></a></li>{% endif %}
+            {% if has_permission('CAN_MANAGE_VENDORS') %}<li class="sidebar-item {% if request.endpoint in ['manage_vendors', 'add_vendor', 'edit_vendor', 'view_vendor'] %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_vendors') }}"><i class="bi bi-person-rolodex"></i><span>Vendors</span></a></li>{% endif %}
+            {% if has_permission('CAN_MANAGE_CATEGORIES') %}<li class="sidebar-item {% if request.endpoint in ['manage_categories', 'add_category', 'edit_category'] %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_categories') }}"><i class="bi bi-tags-fill"></i><span>Categories</span></a></li>{% endif %}
+            {% if has_permission('CAN_MANAGE_LOCATIONS') %}<li class="sidebar-item {% if request.endpoint in ['manage_locations', 'add_location', 'edit_location'] %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_locations') }}"><i class="bi bi-geo-alt-fill"></i><span>Locations</span></a></li>{% endif %}
+            {% if has_permission('CAN_MANAGE_UNITS') %}<li class="sidebar-item {% if request.endpoint == 'manage_units' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_units') }}"><i class="bi bi-rulers"></i><span>Units & Measurement</span></a></li>{% endif %}
+            {% if has_permission('CAN_MANAGE_CURRENCIES') %}<li class="sidebar-item {% if request.endpoint == 'manage_currencies' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_currencies') }}"><i class="bi bi-cash-coin"></i><span>Currencies</span></a></li>{% endif %}
+            {% if has_permission('CAN_VIEW_REPORTS') %}
+            {% set perf_endpoints = ['technician_performance'] %}
+            <li class="sidebar-item {% if request.endpoint in perf_endpoints %}active{% endif %}">
+                <a class="sidebar-link" href="{{ url_for('technician_performance') }}"><i class="bi bi-person-check-fill"></i><span>Technician Performance</span></a>
             </li>
-            {% set category_endpoints = ['manage_categories', 'add_category', 'edit_category'] %}
-            <li class="sidebar-item {% if request.endpoint in category_endpoints %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_categories') }}"><i class="bi bi-tags-fill"></i><span>Categories</span></a></li>
-            {% set location_endpoints = ['manage_locations', 'add_location', 'edit_location'] %}
-            <li class="sidebar-item {% if request.endpoint in location_endpoints %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_locations') }}"><i class="bi bi-geo-alt-fill"></i><span>Locations</span></a></li>
-            {% set unit_endpoints = ['manage_units'] %}
-            <li class="sidebar-item {% if request.endpoint in unit_endpoints %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_units') }}"><i class="bi bi-rulers"></i><span>Units & Measurement</span></a></li>
-            {% set currency_endpoints = ['manage_currencies'] %}
-            <li class="sidebar-item {% if request.endpoint in currency_endpoints %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_currencies') }}"><i class="bi bi-cash-coin"></i><span>Currencies</span></a></li>
-            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-person-check-fill"></i><span>Technician Performance</span></a></li>
+            {% endif %}
 
             <!-- Section Separator: Analytics -->
+            {% if has_permission('CAN_VIEW_REPORTS') %}
             <li class="sidebar-section-header">Analytics & Reports</li>
             <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-pie-chart-fill"></i><span>Analytics</span></a></li>
             <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-file-earmark-text-fill"></i><span>Reports</span></a></li>
+            {% endif %}
 
             <!-- Section Separator: System -->
             <li class="sidebar-section-header">System & Notifications</li>
+            
+            {% if has_permission('CAN_SEND_BROADCASTS') %}
             <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-broadcast"></i><span>Emergency Broadcast</span></a></li>
-            {% set log_endpoints = ['notification_logs'] %}
-            <li class="sidebar-item {% if request.endpoint in log_endpoints %}active{% endif %}">
-                <a class="sidebar-link" href="{{ url_for('notification_logs') }}"><i class="bi bi-bell-fill"></i><span>Notification Logs</span></a>
+            {% endif %}
+            
+            <li class="sidebar-item {% if request.endpoint == 'notification_logs' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('notification_logs') }}"><i class="bi bi-bell-fill"></i><span>Notification Logs</span></a></li>
+            
+            {% if has_permission('CAN_MANAGE_SETTINGS') %}
+            {% set settings_endpoints = ['system_settings'] %}
+            <li class="sidebar-item {% if request.endpoint in settings_endpoints %}active{% endif %}">
+                <a class="sidebar-link" href="{{ url_for('system_settings') }}"><i class="bi bi-sliders"></i><span>System Settings</span></a>
             </li>
-            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-sliders"></i><span>System Settings</span></a></li>
+            {% endif %}
         </ul>
     </div>
 
@@ -110,4 +114,4 @@
             <span>Logout</span>
         </a>
     </div>
-</div>
+</div>```

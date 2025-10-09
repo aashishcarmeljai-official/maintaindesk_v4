@@ -479,6 +479,30 @@ Status Bar Styles (Work Order View)
 
 /*
 ================================================
+Dashboard Styles
+================================================
+*/
+.icon-circle {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+width: 64px;
+height: 64px;
+border-radius: 50%;
+}
+
+.fc-event-urgent, .fc-event-critical {
+background-color: #dc3545 !important;
+border-color: #dc3545 !important;
+}
+.fc-event-high {
+background-color: #ffc107 !important;
+border-color: #ffc107 !important;
+color: #000 !important;
+}
+
+/*
+================================================
 Dark Mode Component Overrides
 ================================================
 */

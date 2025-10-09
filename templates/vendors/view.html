@@ -4,13 +4,12 @@
 <div class="container-fluid p-4">
     <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-3">
+        <div><h1 class="h3 mb-0">{{ vendor.name }}</h1></div>
         <div>
-            <h1 class="h3 mb-0">{{ vendor.name }}</h1>
-        </div>
-        <div>
-            <a href="{{ url_for('manage_vendors') }}" class="btn btn-secondary">
-                <i class="bi bi-arrow-left me-1"></i> Back to All Vendors
-            </a>
+            {% if has_permission('CAN_EDIT_VENDORS') %}
+            <a href="{{ url_for('edit_vendor', vendor_id=vendor.id) }}" class="btn btn-primary"><i class="bi bi-pencil-square me-1"></i> Edit Vendor</a>
+            {% endif %}
+            <a href="{{ url_for('manage_vendors') }}" class="btn btn-secondary ms-1"><i class="bi bi-arrow-left me-1"></i> Back to All Vendors</a>
         </div>
     </div>
 
@@ -156,12 +155,17 @@
             <div class="card">
                 <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
                 <div class="list-group list-group-flush">
+                    {% if has_permission('CAN_EDIT_VENDORS') %}
                     <a href="{{ url_for('edit_vendor', vendor_id=vendor.id) }}" class="list-group-item list-group-item-action">
                         <i class="bi bi-pencil-square me-2"></i>Edit Vendor
                     </a>
+                    {% endif %}
+                    
+                    {% if has_permission('CAN_DELETE_VENDORS') %}
                     <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
                         <i class="bi bi-trash me-2"></i>Delete Vendor
                     </a>
+                    {% endif %}
                 </div>
             </div>
         </div>

@@ -8,9 +8,11 @@
             <h1 class="h3 mb-0">Manage Inventory</h1>
             <p class="text-muted mb-0">All company parts and stock items.</p>
         </div>
-        <a href="{{ url_for('add_inventory_item') }}" class="btn btn-primary">
-            <i class="bi bi-plus-circle me-1"></i> Add Inventory Item
-        </a>
+        {% if has_permission('CAN_ADD_INVENTORY') %}
+            <a href="{{ url_for('add_inventory_item') }}" class="btn btn-primary">
+                <i class="bi bi-plus-circle me-1"></i> Add Inventory Item
+            </a>
+        {% endif %}
     </div>
 
     {% include 'partials/_flash_messages.html' %}
@@ -61,18 +63,27 @@
                                     <i class="bi bi-exclamation-triangle-fill text-warning ms-1" title="Stock is at or below minimum level"></i>
                                 {% endif %}
                             </td>
+                                
                             <td class="text-end">
+                                {% if has_permission('CAN_VIEW_INVENTORY') %}
                                 <a href="{{ url_for('view_inventory_item', item_id=item.id) }}" class="btn btn-sm btn-outline-info" title="View">
                                     <i class="bi bi-eye"></i>
                                 </a>
+                                {% endif %}
+
+                                {% if has_permission('CAN_EDIT_INVENTORY') %}
                                 <a href="{{ url_for('edit_inventory_item', item_id=item.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
                                     <i class="bi bi-pencil-square"></i>
                                 </a>
-                                <form action="{{ url_for('delete_inventory_item', item_id=item.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure you want to delete this item?');">
+                                {% endif %}
+
+                                {% if has_permission('CAN_DELETE_INVENTORY') %}
+                                <form action="{{ url_for('delete_inventory_item', item_id=item.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure...?');">
                                     <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </form>
+                                {% endif %}
                             </td>
                         </tr>
                         {% else %}

@@ -131,13 +131,21 @@
         <div class="col-lg-4">
             <!-- Quick Actions Card -->
             <div class="card">
-                <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
+                <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>   
                 <div class="list-group list-group-flush">
-                    <a href="{{ url_for('edit_inventory_item', item_id=item.id) }}" class="list-group-item list-group-item-action"><i class="bi bi-pencil-square me-2"></i>Edit Inventory Item</a>
+                    {% if has_permission('CAN_EDIT_INVENTORY') %}
+                    <a href="{{ url_for('edit_inventory_item', item_id=item.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-pencil-square me-2"></i>Edit Inventory Item
+                    </a>
+                    {% endif %}
+
                     <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-card-list me-2"></i>View Work Orders</a>
+
+                    {% if has_permission('CAN_DELETE_INVENTORY') %}
                     <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
                         <i class="bi bi-trash me-2"></i>Delete Inventory Item
                     </a>
+                    {% endif %}
                 </div>
             </div>
         </div>

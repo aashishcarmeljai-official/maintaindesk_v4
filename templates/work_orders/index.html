@@ -8,9 +8,11 @@
             <h1 class="h3 mb-0">Work Orders</h1>
             <p class="text-muted mb-0">Manage all maintenance tasks and requests.</p>
         </div>
-        <a href="{{ url_for('add_work_order') }}" class="btn btn-primary mt-2">
+        {% if has_permission('CAN_CREATE_WORK_ORDER') %}
+        <a href="{{ url_for('add_work_order') }}" class="btn btn-primary">
             <i class="bi bi-plus-circle me-1"></i> Create Work Order
         </a>
+        {% endif %}
     </div>
 
     {% include 'partials/_flash_messages.html' %}
@@ -88,30 +90,32 @@
                                         <td>{{ wo.priority }}</td>
                                         <td><span class="badge bg-info">{{ wo.status }}</span></td> <!-- We'll add dynamic colors later -->
                                         <td>{{ wo.work_order_type }}</td>
-                                        <td>{{ wo.scheduled_date.strftime('%Y-%m-%d') if wo.scheduled_date else 'N/A' }}</td>
+                                        <td>{{ wo.scheduled_date.strftime('%Y-%m-%d') if wo.scheduled_date else 'N/A' }}</td>  
                                         <td class="text-end">
-                                            {% set can_manage = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in (current_user.role.permissions | map(attribute='name')) %}
+                                            {% set can_manage_all = has_permission('CAN_MANAGE_ALL_WORK_ORDERS') %}
+                                            {% set can_edit = has_permission('CAN_EDIT_WORK_ORDER') %}
+                                            {% set can_delete = has_permission('CAN_DELETE_WORK_ORDER') %}
                                             {% set is_creator = wo.created_by_id == current_user.id %}
 
-                                            <!-- View Button: Always visible to anyone who can see the WO -->
+                                            <!-- View Button is always available if the row is visible -->
                                             <a href="{{ url_for('view_work_order', wo_id=wo.id) }}" class="btn btn-sm btn-outline-info" title="View">
                                                 <i class="bi bi-eye"></i>
                                             </a>
 
-                                            <!-- Edit Button Logic -->
-                                            {% if can_manage or is_creator %}
-                                                <a href="{{ url_for('edit_work_order', wo_id=wo.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
-                                                    <i class="bi bi-pencil-square"></i>
-                                                </a>
+                                            <!-- Edit Button: Visible if user has general edit permission AND is a manager OR the creator -->
+                                            {% if can_edit and (can_manage_all or is_creator) %}
+                                            <a href="{{ url_for('edit_work_order', wo_id=wo.id) }}" class="btn btn-sm btn-outline-primary" title="Edit">
+                                                <i class="bi bi-pencil-square"></i>
+                                            </a>
                                             {% endif %}
 
-                                            <!-- Delete Button Logic -->
-                                            {% if can_manage or is_creator %}
-                                                <form action="{{ url_for('delete_work_order', wo_id=wo.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure? This will require re-approval if you are not an admin.');">
-                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
-                                                        <i class="bi bi-trash"></i>
-                                                    </button>
-                                                </form>
+                                            <!-- Delete Button: Visible if user has general delete permission AND is a manager OR the creator -->
+                                            {% if can_delete and (can_manage_all or is_creator) %}
+                                            <form action="{{ url_for('delete_work_order', wo_id=wo.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure you want to delete this work order?');">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
                                             {% endif %}
                                         </td>
                                     </tr>

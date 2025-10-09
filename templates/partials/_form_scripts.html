@@ -8,7 +8,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Generic ID Generation (Handles Equipment and Inventory)
     const nameInput = document.getElementById('name');
     const idInput = document.getElementById('equipment_id') || document.getElementById('part_number');
-    if (idInput && !idInput.value) { // Only run on 'add' pages where the ID is empty
+    
+    // Only run if BOTH nameInput and idInput exist
+    if (nameInput && idInput && !idInput.value) { // Only run on 'add' pages where the ID is empty
         const prefix = (idInput.id === 'equipment_id') ? 'EQ' : 'PART';
         nameInput.addEventListener('keyup', function() {
             const name = this.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').replace(/\s+/g, '-');
@@ -76,7 +78,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function setupFilePreview(inputId, previewContainerId) {
         const fileInput = document.getElementById(inputId);
         const previewContainer = document.getElementById(previewContainerId);
-        if (!fileInput) return null; // Return null if not found
+        if (!fileInput || !previewContainer) {
+            console.log(`Preview setup skipped for ${inputId} - element not found`);
+            return null; // Return null if not found
+        }
         
         let fileStore = new DataTransfer();
 
@@ -158,6 +163,8 @@ document.addEventListener('DOMContentLoaded', function() {
         audio_files: setupFilePreview('audio_files', 'audio_files-preview'),
         documents: setupFilePreview('documents', 'documents-preview')
     };
+    
+    console.log('Preview handlers initialized:', window.previewHandlers);
     
     // Generic event listener for deleting existing media files
     document.querySelectorAll('.existing-media-delete-btn').forEach(button => {

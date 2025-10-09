@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">System Settings</h1>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <div class="card">
+        <!-- Tab Navigation -->
+        <div class="card-header">
+            <ul class="nav nav-tabs card-header-tabs" id="settingsTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="general-tab" data-bs-toggle="tab" data-bs-target="#general-pane" type="button" role="tab" aria-controls="general-pane" aria-selected="true">General</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="backup-tab" data-bs-toggle="tab" data-bs-target="#backup-pane" type="button" role="tab" aria-controls="backup-pane" aria-selected="false">Backup & Restore</button>
+                </li>
+            </ul>
+        </div>
+        <div class="card-body">
+            <div class="tab-content" id="settingsTabContent">
+                <!-- Tab 1: General Settings -->
+                <div class="tab-pane fade show active" id="general-pane" role="tabpanel">
+                    <h5 class="card-title mb-3">Company Information</h5>
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label for="company_name" class="form-label">Company Name</label>
+                                <input type="text" class="form-control" id="company_name" name="company_name" value="{{ company.name }}" readonly disabled>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6 class="mb-3">Usage Statistics</h6>
+                            <ul class="list-group">
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Users
+                                    <span class="badge bg-primary rounded-pill">{{ stats.user_count }} / {{ stats.user_limit }}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Equipment
+                                    <span class="badge bg-secondary rounded-pill">{{ stats.equipment_count }}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Inventory Items
+                                    <span class="badge bg-secondary rounded-pill">{{ stats.inventory_count }}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    Work Orders
+                                    <span class="badge bg-secondary rounded-pill">{{ stats.wo_count }}</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Backup & Restore -->
+                <div class="tab-pane fade" id="backup-pane" role="tabpanel">
+                    <h5 class="card-title mb-3">Backup Data</h5>
+                    <p class="text-muted">
+                        Generate a full backup of your company's database information (Users, Equipment, Work Orders, etc.) as a JSON file.
+                        <br>
+                        <strong class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> Note:</strong> This process backs up database records only. Uploaded media files (images, documents, etc.) are not included.
+                    </p>
+                    <form action="{{ url_for('backup_data') }}" method="GET">
+                        <!-- The duration selector is removed as we only support 'All Time' -->
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-download me-1"></i> Generate & Download Full Backup</button>
+                    </form>
+
+                    <hr class="my-4">
+
+                    <h5 class="card-title mb-3">Restore from Backup</h5>
+                    <p class="text-danger">
+                        <strong>Warning:</strong> Restoring from a backup will <strong class="text-decoration-underline">permanently delete all existing data</strong> for your company and replace it with the data from the backup file. This action cannot be undone.
+                    </p>
+                    <p class="text-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i> Uploaded media files are not affected by this process.
+                    </p>
+                    <form action="{{ url_for('restore_data') }}" method="POST" enctype="multipart/form-data">
+                        <div class="mb-3">
+                            <label for="backup_file" class="form-label">Upload Backup File (.json)</label>
+                            <input class="form-control" type="file" id="backup_file" name="backup_file" accept=".json" required>
+                        </div>
+
+                        <!-- Type-to-confirm for safety -->
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" value="" id="confirmCheckbox">
+                            <label class="form-check-label" for="confirmCheckbox">
+                                I understand the consequences and wish to proceed with the data restoration.
+                            </label>
+                        </div>
+                        
+                        <button type="submit" id="restoreBtn" class="btn btn-danger" disabled>
+                            <i class="bi bi-upload me-1"></i> Overwrite and Restore Data
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const confirmCheckbox = document.getElementById('confirmCheckbox');
+    const restoreBtn = document.getElementById('restoreBtn');
+
+    if (confirmCheckbox && restoreBtn) {
+        confirmCheckbox.addEventListener('change', function() {
+            // Enable the restore button only if the checkbox is checked
+            restoreBtn.disabled = !this.checked;
+        });
+    }
+});
+</script>
+{% endblock %}
