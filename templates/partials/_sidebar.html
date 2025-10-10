@@ -71,11 +71,7 @@
             {% if has_permission('CAN_MANAGE_UNITS') %}<li class="sidebar-item {% if request.endpoint == 'manage_units' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_units') }}"><i class="bi bi-rulers"></i><span>Units & Measurement</span></a></li>{% endif %}
             {% if has_permission('CAN_MANAGE_CURRENCIES') %}<li class="sidebar-item {% if request.endpoint == 'manage_currencies' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_currencies') }}"><i class="bi bi-cash-coin"></i><span>Currencies</span></a></li>{% endif %}
             {% if has_permission('CAN_VIEW_REPORTS') %}
-            {% set perf_endpoints = ['technician_performance'] %}
-            <li class="sidebar-item {% if request.endpoint in perf_endpoints %}active{% endif %}">
-                <a class="sidebar-link" href="{{ url_for('technician_performance') }}"><i class="bi bi-person-check-fill"></i><span>Technician Performance</span></a>
-            </li>
-            {% endif %}
+            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-person-check-fill"></i><span>Technician Performance</span></a></li>
 
             <!-- Section Separator: Analytics -->
             {% if has_permission('CAN_VIEW_REPORTS') %}
