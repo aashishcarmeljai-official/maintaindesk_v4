@@ -3504,29 +3504,30 @@ def get_work_order_form_data():
 
 @app.route('/work-orders')
 @login_required
-@permission_required('CAN_CREATE_WORK_ORDER') # Base permission needed to see the page
+@permission_required('CAN_CREATE_WORK_ORDER') # Base permission to see the page
 def manage_work_orders():
     search_query = request.args.get('q', '').strip()
+    
     # --- Determine user's permissions ---
     can_manage_all = current_user.role.is_admin or 'CAN_MANAGE_ALL_WORK_ORDERS' in [p.name for p in current_user.role.permissions]
     can_approve = current_user.role.is_admin or 'CAN_APPROVE_WORK_ORDER' in [p.name for p in current_user.role.permissions]
 
     # --- Base Query ---
-    # Eagerly load all related data needed for the table
+    # Eagerly load all related data needed for the table display to prevent N+1 queries.
     base_query = WorkOrder.query.options(
         joinedload(WorkOrder.equipment),
         joinedload(WorkOrder.location),
         joinedload(WorkOrder.assigned_user),
-        joinedload(WorkOrder.assigned_team)
+        joinedload(WorkOrder.assigned_team),
+        joinedload(WorkOrder.created_by) # Needed for the requests tab
     ).filter(WorkOrder.company_id == current_user.company_id)
 
-    # --- Filter based on role ---
-    if can_manage_all:
-        work_orders_query = base_query
-    else:
-        # A user can see work orders they created, are assigned to, or are on a team they are a member of.
+    # --- Filter query based on user role ---
+    work_orders_query = base_query
+    if not can_manage_all:
+        # A non-manager can see WOs they created, are assigned to, or are on a team they are a member of.
         user_team_ids = [team.id for team in current_user.teams]
-        work_orders_query = base_query.filter(
+        work_orders_query = work_orders_query.filter(
             db.or_(
                 WorkOrder.created_by_id == current_user.id,
                 WorkOrder.assigned_to_user_id == current_user.id,
@@ -3534,23 +3535,37 @@ def manage_work_orders():
             )
         )
 
-    # --- Handle Search ---
+    # --- Handle Search Logic (Corrected) ---
     if search_query:
         search_term = f"%{search_query}%"
-        work_orders_query = work_orders_query.filter(
-            db.or_(
-                WorkOrder.title.ilike(search_term),
-                WorkOrder.id.ilike(search_term), # Search by WO number
-                Equipment.name.ilike(search_term) # Search by equipment name
-            )
-        )
-
-    # --- Fetch "Requests" (On Hold work orders) if user has permission ---
-    requests_query = None
+        
+        # Build a list of potential filter conditions for text-based fields
+        filters = [
+            WorkOrder.title.ilike(search_term),
+            Equipment.name.ilike(search_term),
+            Equipment.equipment_id.ilike(search_term)
+        ]
+        
+        # Only try to match the Work Order ID if the search query is a number
+        if search_query.isdigit():
+            filters.append(WorkOrder.id == int(search_query))
+            
+        # Apply the filters, joined by OR
+        work_orders_query = work_orders_query.join(WorkOrder.equipment).filter(db.or_(*filters))
+    
+    # --- Fetch "Requests" (On Hold work orders) if user has approval permission ---
+    requests_list = []
     if can_approve:
-        requests_query = base_query.filter(WorkOrder.status == 'On Hold').order_by(WorkOrder.created_at.desc()).all()
+        # We query separately for requests to keep the logic clean
+        requests_list = WorkOrder.query.options(
+            joinedload(WorkOrder.equipment),
+            joinedload(WorkOrder.created_by)
+        ).filter(
+            WorkOrder.company_id == current_user.company_id,
+            WorkOrder.status == 'On Hold'
+        ).order_by(WorkOrder.created_at.desc()).all()
 
-    # Get the final list of "approved" work orders
+    # --- Get the final list of "active" work orders for the main table ---
     work_orders = work_orders_query.filter(
         ~WorkOrder.status.in_(['On Hold', 'Rejected'])
     ).order_by(WorkOrder.created_at.desc()).all()
@@ -3558,7 +3573,7 @@ def manage_work_orders():
     return render_template(
         'work_orders/index.html',
         work_orders=work_orders,
-        work_order_requests=requests_query,
+        work_order_requests=requests_list,
         can_approve=can_approve,
         search_query=search_query
     )
@@ -3671,7 +3686,15 @@ def add_work_order():
             
         return redirect(url_for('manage_work_orders'))
     
-    return render_template('work_orders/form.html', form_data=get_work_order_form_data(), wo=None)
+    # Get the pre-selected equipment ID from the URL query string, if it exists
+    preselected_equipment_id = request.args.get('equipment_id', type=int)
+
+    return render_template(
+        'work_orders/form.html', 
+        form_data=get_work_order_form_data(), 
+        wo=None,
+        preselected_equipment_id=preselected_equipment_id
+    )
 
 @app.route('/work-orders/edit/<int:wo_id>', methods=['GET', 'POST'])
 @login_required

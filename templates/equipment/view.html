@@ -129,10 +129,23 @@
                     </a>
                     {% endif %}
 
-                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-tools me-2"></i>Create Work Order</a>
-                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-qr-code me-2"></i>Generate QR Code</a>
-                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-card-list me-2"></i>View Work Orders</a>
-                    <a href="#" class="list-group-item list-group-item-action"><i class="bi bi-box-seam me-2"></i>Check Inventory</a>
+                    {% if has_permission('CAN_CREATE_WORK_ORDER') %}
+                    <a href="{{ url_for('add_work_order', equipment_id=equipment.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-tools me-2"></i>Create Work Order
+                    </a>
+                    {% endif %}
+                    
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="bi bi-qr-code me-2"></i>Generate QR Code
+                    </a>
+                    
+                    <a href="{{ url_for('manage_work_orders', q=equipment.equipment_id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-card-list me-2"></i>View Work Orders
+                    </a>
+
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="bi bi-box-seam me-2"></i>Check Inventory
+                    </a>
 
                     {% if has_permission('CAN_DELETE_EQUIPMENT') %}
                     <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">

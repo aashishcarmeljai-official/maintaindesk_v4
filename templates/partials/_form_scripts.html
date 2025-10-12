@@ -72,6 +72,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    // --- PRE-SELECTION LOGIC ---
+    // This script will run on any form that includes this partial
+    const preselectedEquipmentId = '{{ preselected_equipment_id or '' }}';
+    if (preselectedEquipmentId && tomSelects['equipment_id']) {
+        // Use a short timeout to ensure TomSelect is fully initialized
+        setTimeout(() => {
+            tomSelects['equipment_id'].setValue(preselectedEquipmentId);
+        }, 100);
+    }
+
     // --- PART 2: GENERIC MEDIA LOGIC ---
 
     // Generic Client-Side File Preview Logic

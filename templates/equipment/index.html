@@ -76,10 +76,12 @@
                                     <i class="bi bi-pencil-square"></i>
                                 </a>
                                 {% endif %}
-                                
-                                <a href="#" class="btn btn-sm btn-outline-success" title="Create Work Order">
+                                   
+                                {% if has_permission('CAN_CREATE_WORK_ORDER') %}
+                                <a href="{{ url_for('add_work_order', equipment_id=item.id) }}" class="btn btn-sm btn-outline-success" title="Create Work Order">
                                     <i class="bi bi-tools"></i>
                                 </a>
+                                {% endif %}
 
                                 {% if has_permission('CAN_DELETE_EQUIPMENT') %}
                                 <form action="{{ url_for('delete_equipment', equip_id=item.id) }}" method="POST" class="d-inline ms-1" onsubmit="return confirm('Are you sure...?');">
