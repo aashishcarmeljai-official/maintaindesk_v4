@@ -134,8 +134,8 @@
                         <i class="bi bi-tools me-2"></i>Create Work Order
                     </a>
                     {% endif %}
-                    
-                    <a href="#" class="list-group-item list-group-item-action">
+                                       
+                    <a href="{{ url_for('generate_qr_code', equip_id=equipment.id) }}" class="list-group-item list-group-item-action">
                         <i class="bi bi-qr-code me-2"></i>Generate QR Code
                     </a>
                     

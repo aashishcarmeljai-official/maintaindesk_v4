@@ -336,6 +336,10 @@ class WorkOrder(db.Model):
     status = db.Column(db.String(50), default='Open', nullable=False) # On Hold, Open, In Progress, Completed, Rejected
     work_order_type = db.Column(db.String(50)) # Corrective, Preventive, Emergency
     
+    # Guest Data
+    guest_reporter_name = db.Column(db.String(100), nullable=True)
+    guest_reporter_email = db.Column(db.String(120), nullable=True)
+    
     # Dates
     scheduled_date = db.Column(db.DateTime)
     due_date = db.Column(db.DateTime)
@@ -367,3 +371,41 @@ class WorkOrder(db.Model):
     created_by = db.relationship('User', foreign_keys=[created_by_id], backref='created_work_orders')
     assigned_user = db.relationship('User', foreign_keys=[assigned_to_user_id], backref='assigned_work_orders')
     assigned_team = db.relationship('Team', foreign_keys=[assigned_to_team_id], backref='work_orders')
+    
+class MqttConfig(db.Model):
+    """Stores MQTT broker configuration for a company."""
+    __tablename__ = 'mqtt_configs'
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), unique=True, nullable=False)
+    
+    host = db.Column(db.String(255), nullable=False)
+    port = db.Column(db.Integer, default=1883, nullable=False)
+    username = db.Column(db.String(100))
+    password = db.Column(db.String(100)) # In a real app, encrypt this!
+    
+    company = db.relationship('Company', backref=db.backref('mqtt_config', uselist=False, cascade="all, delete-orphan"))
+    
+class Meter(db.Model):
+    """Represents an IoT meter or sensor that publishes data to MQTT."""
+    __tablename__ = 'meters'
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    
+    name = db.Column(db.String(100), nullable=False)
+    mqtt_topic = db.Column(db.String(255), nullable=False, unique=True) # Topics must be unique
+    
+    equipment_id = db.Column(db.Integer, db.ForeignKey('equipment.id'), nullable=False)
+    location_id = db.Column(db.Integer, db.ForeignKey('locations.id'))
+    
+    images = db.Column(JSONB)
+    videos = db.Column(JSONB)
+    audio_files = db.Column(JSONB)
+    documents = db.Column(JSONB)
+    
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    company = db.relationship('Company', backref=db.backref('meters', lazy=True))
+    equipment = db.relationship('Equipment', backref=db.backref('meters', lazy=True))
+    location = db.relationship('Location', backref=db.backref('meters', lazy=True))

@@ -40,6 +40,16 @@
             </li>
             {% endif %}
 
+            <!-- Meters -->
+            {% if has_permission('CAN_MANAGE_METERS') %}
+            {% set meter_endpoints = ['manage_meters', 'add_meter', 'edit_meter'] %}
+            <li class="sidebar-item {% if request.endpoint in meter_endpoints %}active{% endif %}">
+                <a class="sidebar-link" href="{{ url_for('manage_meters') }}">
+                    <i class="bi bi-speedometer2"></i><span>Meters</span>
+                </a>
+            </li>
+            {% endif %}
+
             <!-- Users & Company Management -->
             {% if has_permission('CAN_MANAGE_USERS') or has_permission('CAN_MANAGE_TEAMS') or has_permission('CAN_MANAGE_ROLES') %}
             {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'invite_user', 'manage_roles', 'edit_role', 'create_role', 'manage_teams', 'add_team', 'edit_team'] %}
@@ -77,7 +87,7 @@
             <!-- Section Separator: Analytics -->
             {% if has_permission('CAN_VIEW_REPORTS') %}
             <li class="sidebar-section-header">Analytics & Reports</li>
-            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-pie-chart-fill"></i><span>Analytics</span></a></li>
+            <li class="sidebar-item"><a class="sidebar-link" href="{{ url_for('view_meter_analytics') }}"><i class="bi bi-pie-chart-fill"></i><span>Analytics</span></a></li>
             <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-file-earmark-text-fill"></i><span>Reports</span></a></li>
             {% endif %}
 

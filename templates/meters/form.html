@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">Register New Meter</h1>
+    
+    <form id="meterForm" method="POST" enctype="multipart/form-data">
+        <!-- Main Details Card -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Meter Details</h5></div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="name" class="form-label">Meter Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="mqtt_topic" class="form-label">MQTT Topic <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="mqtt_topic" name="mqtt_topic" placeholder="e.g., facility/floor1/ahu01/energy" required>
+                    </div>
+                </div>
+                 <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="equipment_id" class="form-label">Associate with Equipment <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <select id="equipment_id" name="equipment_id" required>
+                                <option value="">Select equipment...</option>
+                                {% for eq in form_data.equipment %}<option value="{{ eq.id }}">{{ eq.name }}</option>{% endfor %}
+                            </select>
+                            <a href="{{ url_for('add_equipment') }}" target="_blank" class="btn btn-outline-secondary"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="equipment" data-api-url="{{ url_for('api_get_equipment') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="location_id" class="form-label">Associate with Location</label>
+                        <div class="input-group">
+                            <select id="location_id" name="location_id">
+                                <option value="">Select location...</option>
+                                {% for loc in form_data.locations %}<option value="{{ loc.id }}">{{ loc.name }}</option>{% endfor %}
+                            </select>
+                            <a href="{{ url_for('add_location') }}" target="_blank" class="btn btn-outline-secondary"><i class="bi bi-plus"></i></a>
+                            <button class="btn btn-outline-secondary refresh-btn" type="button" data-type="location" data-api-url="{{ url_for('api_get_locations') }}"><i class="bi bi-arrow-clockwise"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Media Uploads Card -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Datasheets & Files</h5></div>
+            <div class="card-body">
+                <p class="text-muted small">Upload or capture relevant datasheets, manuals, or photos of the meter installation.</p>
+                <div class="mb-3">
+                    <label for="images" class="form-label">Images</label>
+                    <div class="input-group">
+                        <input class="form-control" type="file" id="images" name="images" multiple accept="image/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="image"><i class="bi bi-camera-fill me-1"></i> Capture</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="images-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="videos" class="form-label">Videos</label>
+                    <div class="input-group">
+                        <input class="form-control" type="file" id="videos" name="videos" multiple accept="video/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="video"><i class="bi bi-camera-reels-fill me-1"></i> Record</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="videos-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="audio_files" class="form-label">Audio Notes</label>
+                     <div class="input-group">
+                        <input class="form-control" type="file" id="audio_files" name="audio_files" multiple accept="audio/*">
+                        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#captureModal" data-capture-type="audio"><i class="bi bi-mic-fill me-1"></i> Record</button>
+                    </div>
+                    <div class="row gx-2 gy-2 mt-2" id="audio_files-preview"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="documents" class="form-label">Documents (Datasheets, Manuals)</label>
+                    <input class="form-control" type="file" id="documents" name="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt">
+                    <div class="row gx-2 gy-2 mt-2" id="documents-preview"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Display Existing Media (only on edit) -->
+        {% if meter %}
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Existing Media</h5></div>
+            <div class="card-body">
+                {% set media_types = [
+                    ('images', 'Images', meter.images), 
+                    ('videos', 'Videos', meter.videos), 
+                    ('audio', 'Audio Files', meter.audio_files), 
+                    ('documents', 'Documents', meter.documents)
+                ] %}
+                {% set has_media = false %}
+                {% for folder, title, files in media_types %}{% if files %}{% set has_media = true %}{% endif %}{% endfor %}
+
+                {% if has_media %}
+                    <div class="row gx-2 gy-2">
+                    {% for folder, title, files in media_types %}
+                        {% if files %}
+                            {% for filename in files %}
+                            <div class="col-auto">
+                                <div class="card h-100" style="width: 150px;">
+                                    <a href="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" target="_blank" class="text-center p-3">
+                                        {% if folder == 'images' %}<img src="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Preview">
+                                        {% elif folder == 'videos' %}<i class="bi bi-film fs-1"></i>
+                                        {% elif folder == 'audio' %}<i class="bi bi-music-note-beamed fs-1"></i>
+                                        {% else %}<i class="bi bi-file-earmark-text fs-1"></i>
+                                        {% endif %}
+                                    </a>
+                                    <div class="card-body p-2 text-center">
+                                        <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p>
+                                    </div>
+                                    <div class="card-footer p-1">
+                                        <form id="delete-form-{{ filename | replace('.', '_') }}" action="{{ url_for('delete_meter_media', meter_id=meter.id) }}" method="POST">
+                                            <input type="hidden" name="filename" value="{{ filename }}">
+                                            <input type="hidden" name="file_type" value="{{ 'audio_files' if folder == 'audio' else folder }}">
+                                            <button type="button" class="btn btn-sm btn-danger w-100 existing-media-delete-btn">
+                                                <i class="bi bi-trash"></i> Delete
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted">No media has been uploaded for this meter yet.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="text-end">
+            <a href="{{ url_for('manage_meters') }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary" form="meterForm">Save Meter</button>
+        </div>
+    </form>
+</div>
+
+<!-- Universal Capture Modal -->
+{% include 'partials/_capture_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+    {% include 'partials/_form_scripts.html' %}
+{% endblock %}

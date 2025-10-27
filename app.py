@@ -4,6 +4,8 @@ import csv
 import pint
 import json
 import uuid
+import qrcode
+import base64
 import random
 import string
 from flask_mail import Mail, Message
@@ -14,7 +16,8 @@ from flask import Flask, render_template, redirect, url_for, request, session, a
 from flask import flash as flask_flash, g
 from flask_session import Session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, user_logged_in
-from models import db, bcrypt, User, Company, Role, Location, Permission, Category, Department, Equipment, Unit, Currency, InventoryItem, Vendor, VendorContact, Team, team_members, NotificationLog, WorkOrder
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from models import db, bcrypt, User, Company, Role, Location, Permission, Category, Department, Equipment, Unit, Currency, InventoryItem, Vendor, VendorContact, Team, team_members, NotificationLog, WorkOrder, MqttConfig, Meter
 from sqlalchemy import func, cast, text, case
 import pycountry
 from sqlalchemy.orm.attributes import flag_modified
@@ -47,6 +50,10 @@ app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER')
 
 mail = Mail(app)
+
+# --- SOCKETIO INITIALIZATION ---
+# We use 'threading' for the dev server and will switch to eventlet for production.
+socketio = SocketIO(app, async_mode='threading')
 
 ADMIN_PASS_FILE = os.path.join(app.root_path, 'admin_password.json')
 ORG_DATA_FILE = os.path.join(app.root_path, 'o_d.json')
@@ -254,6 +261,18 @@ def create_default_roles_and_permissions(company_id):
             symbol=data['symbol']
         )
         db.session.add(new_curr)
+        
+    # Create a generic "System Reporter" user for this company
+    system_reporter = User(
+        company_id=company_id,
+        username=f"system_reporter_{company_id}",
+        email=f"system_reporter_{company_id}@internal.maintaindesk.com",
+        first_name="System",
+        last_name="Reporter",
+        is_active=False # This account cannot be logged into
+    )
+    system_reporter.set_password(uuid.uuid4().hex) # Set a secure, random, unknown password
+    db.session.add(system_reporter)
     db.session.commit()
 
 @login_manager.user_loader
@@ -537,14 +556,51 @@ def index():
 def system_settings():
     company = current_user.company
     
+    # --- GET or CREATE the MQTT Config for this company ---
+    # `company.mqtt_config` works because of the `uselist=False` backref
+    mqtt_config = company.mqtt_config
+    if not mqtt_config:
+        # If no config exists, create an empty one to pass to the template
+        mqtt_config = MqttConfig(company_id=company.id)
+    
     if request.method == 'POST':
-        # This will handle the 'General' tab form submission
-        company.name = request.form.get('company_name')
-        db.session.commit()
-        flash('Company settings updated successfully.', 'success')
+        # Check which form was submitted via a hidden input
+        form_name = request.form.get('form_name')
+
+        # NOTE: The "General" tab form is now disabled, so this part is not strictly necessary
+        # but is kept for potential future use.
+        if form_name == 'general_settings':
+            # company.name = request.form.get('company_name') # Company name is read-only
+            flash('Company settings updated successfully.', 'success')
+        
+        elif form_name == 'mqtt_settings':
+            # This handles the 'MQTT Server' tab form submission
+            host = request.form.get('mqtt_host')
+            port = request.form.get('mqtt_port', type=int)
+
+            if not host or not port:
+                flash('MQTT Host and Port are required fields.', 'danger')
+            else:
+                mqtt_config.host = host
+                mqtt_config.port = port
+                mqtt_config.username = request.form.get('mqtt_username')
+                
+                # Only update the password if a new one is provided.
+                # This prevents accidentally clearing the password.
+                if request.form.get('mqtt_password'):
+                    mqtt_config.password = request.form.get('mqtt_password')
+
+                # If the mqtt_config object was newly created and doesn't have an ID,
+                # it needs to be added to the session before committing.
+                if not mqtt_config.id:
+                    db.session.add(mqtt_config)
+                
+                db.session.commit()
+                flash('MQTT server settings saved successfully.', 'success')
+
         return redirect(url_for('system_settings'))
 
-    # Get stats for the general info tab
+    # --- For a GET request, gather stats for the General info tab ---
     stats = {
         'user_count': User.query.filter_by(company_id=company.id).count(),
         'user_limit': company.user_limit,
@@ -553,7 +609,12 @@ def system_settings():
         'wo_count': WorkOrder.query.filter_by(company_id=company.id).count(),
     }
 
-    return render_template('settings/index.html', company=company, stats=stats)
+    return render_template(
+        'settings/index.html', 
+        company=company, 
+        stats=stats, 
+        mqtt_config=mqtt_config
+    )
 
 
 @app.route('/settings/backup')
@@ -1557,41 +1618,59 @@ def send_approval_request_email(work_order):
         print(f"Error sending approval request email for WO #{work_order.id}: {e}")
         
 def send_wo_status_change_email(work_order, is_approved):
-    """Emails the creator of a work order about its approval or rejection."""
-    creator = work_order.created_by
-    if not creator or not creator.email:
-        return # Cannot send email if creator is not found
+    """
+    Emails the creator of a work order about its approval or rejection.
+    Prioritizes guest reporters if their email was provided.
+    """
+    recipient_email = None
+    recipient_name = "User"
+
+    # --- THIS IS THE CORRECTED LOGIC ---
+    # Use getattr for safe access on both real and temp objects
+    guest_email = getattr(work_order, 'guest_reporter_email', None)
+    guest_name = getattr(work_order, 'guest_reporter_name', None)
+
+    if guest_email:
+        recipient_email = guest_email
+        recipient_name = guest_name or "there"
+    elif work_order.created_by and "system_reporter" not in work_order.created_by.username:
+        recipient_email = work_order.created_by.email
+        recipient_name = work_order.created_by.first_name
+    
+    if not recipient_email:
+        print(f"No recipient email found for WO #{work_order.id}. Cannot send status change notification.")
+        return
 
     status_text = "Approved" if is_approved else "Rejected"
     
     msg = Message(
         f"Update on Your Work Order Request: #{work_order.id} - {status_text}",
-        recipients=[creator.email]
+        recipients=[recipient_email]
     )
-
+    
+    # This logic is now safe because rejected WOs are deleted
     if is_approved:
         view_url = url_for('view_work_order', wo_id=work_order.id, _external=True)
         link_text = f"<h3><a href=\"{view_url}\">Work Order #{work_order.id}: {work_order.title}</a></h3>"
     else:
-        view_url = url_for('manage_work_orders', _external=True)
-        link_text = f"<h3>Work Order Request #{work_order.id}: {work_order.title}</h3>" # Not a link
-    
+        link_text = f"<h3>Work Order Request #{work_order.id}: {work_order.title}</h3>"
+
     rejection_reason_html = ""
     if not is_approved and work_order.rejection_reason:
         rejection_reason_html = f"<p><strong>Reason for Rejection:</strong> {work_order.rejection_reason}</p>"
 
     msg.html = f"""
-    <p>Hello {creator.first_name},</p>
+    <p>Hello {recipient_name},</p>
     <p>An update has been made to a work order you requested:</p>
     {link_text}
     <p>The new status is: <strong>{status_text}</strong></p>
     {rejection_reason_html}
-    <p>You can view your work orders for more details.</p>
     <p>Thanks,<br>The MaintainDesk System</p>
     """
     
     try:
         mail.send(msg)
+        print(f"WO status change email sent successfully for WO #{work_order.id} to {recipient_email}")
     except Exception as e:
         print(f"Error sending WO status change email for WO #{work_order.id}: {e}")
 
@@ -2325,6 +2404,136 @@ def delete_equipment_media(equip_id):
         flash('File not found for this equipment.', 'warning')
         
     return redirect(url_for('edit_equipment', equip_id=equip_id))
+
+@app.route('/equipment/qr-code/<int:equip_id>')
+@login_required
+@permission_required('CAN_VIEW_EQUIPMENT') # Or a more specific permission
+def generate_qr_code(equip_id):
+    equipment = Equipment.query.options(
+        joinedload(Equipment.location),
+        joinedload(Equipment.category)
+    ).get_or_404(equip_id)
+    
+    # Security check
+    if equipment.company_id != current_user.company_id:
+        abort(403)
+
+    # --- 1. Generate the URL the QR code will point to ---
+    # _external=True is crucial to get the full domain name
+    qr_url = url_for('report_failure', equip_id=equipment.id, _external=True)
+
+    # --- 2. Generate the QR code image in memory ---
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(qr_url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # --- 3. Convert image to a Data URI for embedding in HTML ---
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    qr_img_data_uri = f"data:image/png;base64,{img_str}"
+    
+    return render_template(
+        'equipment/generate_qr.html', 
+        equipment=equipment,
+        qr_url=qr_url,
+        qr_img=qr_img_data_uri
+    )
+
+# --- PUBLIC FAILURE REPORT ROUTE ---
+
+@app.route('/report-failure/<int:equip_id>', methods=['GET', 'POST'])
+def report_failure(equip_id):
+    # This page is public; no @login_required.
+    # We eager-load all data the form might need for display.
+    equipment = Equipment.query.options(
+        joinedload(Equipment.location),
+        joinedload(Equipment.category),
+        joinedload(Equipment.department)
+    ).get_or_404(equip_id)
+
+    if request.method == 'POST':
+        # --- 1. Find or Create the generic "System Reporter" user for this company ---
+        system_reporter_username = f"system_reporter_{equipment.company_id}"
+        system_reporter = User.query.filter_by(
+            company_id=equipment.company_id, 
+            username=system_reporter_username
+        ).first()
+        
+        if not system_reporter:
+            print(f"System reporter not found for company {equipment.company_id}. Creating one now.")
+            system_reporter = User(
+                company_id=equipment.company_id, username=system_reporter_username,
+                email=f"{system_reporter_username}@internal.maintaindesk.com",
+                first_name="System", last_name="Reporter", is_active=False
+            )
+            system_reporter.set_password(uuid.uuid4().hex)
+            db.session.add(system_reporter)
+            try:
+                # We must commit here to get the user's ID for the foreign key
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"CRITICAL ERROR: Could not create system_reporter. Error: {e}")
+                flash('A critical system configuration error occurred. Could not file report.', 'danger')
+                return render_template('public/report_failure.html', equipment=equipment, hide_sidebar=True)
+
+        # --- 2. Create the Work Order with "On Hold" status and guest info ---
+        new_wo = WorkOrder(
+            company_id=equipment.company_id,
+            title=request.form.get('title'),
+            description=request.form.get('description'),
+            priority=request.form.get('priority', 'Urgent'),
+            work_order_type='Corrective',
+            equipment_id=equipment.id,
+            location_id=equipment.location_id,
+            created_by_id=system_reporter.id,
+            status='On Hold',
+            is_approved=False,
+            guest_reporter_name=request.form.get('guest_name', '').strip() or None,
+            guest_reporter_email=request.form.get('guest_email', '').strip() or None
+        )
+        
+        db.session.add(new_wo)
+        save_actions = []
+        try:
+            db.session.flush() # Get the new_wo.id for file naming
+            
+            saved_files, save_actions = process_uploads(new_wo, request.files, 'work_orders')
+            new_wo.images = saved_files['images'] or []
+            new_wo.videos = saved_files['videos'] or []
+            new_wo.audio_files = saved_files['audio_files'] or []
+            new_wo.documents = saved_files['documents'] or []
+            
+            db.session.commit()
+            for file, path in save_actions:
+                file.save(path)
+            
+            # --- 3. Notify Approvers ---
+            send_approval_request_email(new_wo)
+            
+            flash('Thank you! Your failure report has been successfully submitted for review.', 'success')
+            return redirect(url_for('report_submitted', equip_id=equipment.id))
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'An error occurred while submitting your report: {e}', 'danger')
+            return render_template('public/report_failure.html', equipment=equipment, hide_sidebar=True)
+
+    # For a GET request
+    return render_template('public/report_failure.html', equipment=equipment, hide_sidebar=True)
+
+@app.route('/report-submitted/<int:equip_id>')
+def report_submitted(equip_id):
+    """A simple 'Thank You' page after a successful submission."""
+    equipment = Equipment.query.get_or_404(equip_id)
+    return render_template('public/report_submitted.html', equipment=equipment, hide_sidebar=True)
 
 # --- DATA API GETTER ROUTES ---
 
@@ -3724,6 +3933,10 @@ def edit_work_order(wo_id):
     if request.method == 'POST':
         save_actions = []
         try:
+            # --- Store the OLD assignee IDs before making any changes ---
+            old_user_id = work_order.assigned_to_user_id
+            old_team_id = work_order.assigned_to_team_id
+
             # --- 1. Update Standard Fields ---
             work_order.title = request.form.get('title')
             work_order.priority = request.form.get('priority')
@@ -3734,19 +3947,16 @@ def edit_work_order(wo_id):
             work_order.assigned_to_user_id = request.form.get('assigned_to_user_id') or None
             work_order.assigned_to_team_id = request.form.get('assigned_to_team_id') or None
             scheduled_str = request.form.get('scheduled_date')
-            work_order.scheduled_date = datetime.strptime(scheduled_str, '%Y-%m-%d') if scheduled_str else None
+            work_order.scheduled_date = datetime.strptime(scheduled_str, '%Y-%m-%d').date() if scheduled_str else None
             due_str = request.form.get('due_date')
-            work_order.due_date = datetime.strptime(due_str, '%Y-%m-%d') if due_str else None
+            work_order.due_date = datetime.strptime(due_str, '%Y-%m-%d').date() if due_str else None
             work_order.estimated_duration = request.form.get('estimated_duration') or None
             
             # --- 2. RE-APPROVAL LOGIC ---
-            # If the user making the edit is NOT a manager/admin...
             if not can_manage:
-                # ...then the work order status must revert to 'On Hold' for re-approval.
                 work_order.status = 'On Hold'
                 work_order.is_approved = False
                 flash('Your changes have been submitted for re-approval.', 'info')
-                # Send a notification email to the approvers
                 send_approval_request_email(work_order)
             
             # --- 3. Handle New Media Uploads ---
@@ -3759,7 +3969,16 @@ def edit_work_order(wo_id):
             flag_modified(work_order, "images"); flag_modified(work_order, "videos");
             flag_modified(work_order, "audio_files"); flag_modified(work_order, "documents");
 
-            # --- 4. Commit to DB, then Save Files ---
+            # --- 4. Re-assignment Notification Logic ---
+            new_user_id = int(work_order.assigned_to_user_id) if work_order.assigned_to_user_id else None
+            new_team_id = int(work_order.assigned_to_team_id) if work_order.assigned_to_team_id else None
+            assignment_changed = (old_user_id != new_user_id) or (old_team_id != new_team_id)
+            
+            # Only send if the assignment changed AND the WO is in an active (not On Hold) state.
+            if assignment_changed and work_order.status in ['Open', 'In Progress']:
+                send_work_order_assignment_email(work_order)
+
+            # --- 5. Commit to DB, then Save Files ---
             db.session.commit()
             for file, path in save_actions:
                 file.save(path)
@@ -3769,11 +3988,11 @@ def edit_work_order(wo_id):
         except Exception as e:
             db.session.rollback()
             flash(f'An error occurred while updating the work order: {e}', 'danger')
-            print(f"Error in edit_work_order: {e}") # For debugging
+            print(f"Error in edit_work_order: {e}")
             
         return redirect(url_for('manage_work_orders'))
 
-    # For a GET request, reuse the add form template, passing the existing WO data
+    # For a GET request
     return render_template('work_orders/form.html', form_data=get_work_order_form_data(), wo=work_order)
 
 @app.route('/work-orders/approve/<int:wo_id>', methods=['POST'])
@@ -3825,6 +4044,8 @@ def reject_work_order(wo_id):
                 self.title = wo.title
                 self.created_by = wo.created_by
                 self.rejection_reason = reason
+                self.guest_reporter_name = wo.guest_reporter_name
+                self.guest_reporter_email = wo.guest_reporter_email
         
         notification_data = TempWOInfo(work_order, rejection_reason)
 
@@ -3972,6 +4193,234 @@ def delete_work_order_media(wo_id):
         flash('File not found for this work order.', 'warning')
         
     return redirect(url_for('edit_work_order', wo_id=wo_id))
+
+# --- METER MANAGEMENT ROUTES ---
+
+def get_meter_form_data():
+    """Helper to fetch data for the meter form dropdowns."""
+    company_id = current_user.company_id
+    return {
+        'equipment': Equipment.query.filter_by(company_id=company_id).order_by(Equipment.name).all(),
+        'locations': Location.query.filter_by(company_id=company_id, is_active=True).order_by(Location.name).all(),
+    }
+
+@app.route('/meters')
+@login_required
+@permission_required('CAN_MANAGE_METERS')
+def manage_meters():
+    search_query = request.args.get('q', '').strip()
+    
+    # Base query for meters in the current company
+    query = Meter.query.filter(Meter.company_id == current_user.company_id)
+    
+    # Eagerly load related equipment and location for the table display
+    query = query.options(
+        joinedload(Meter.equipment),
+        joinedload(Meter.location)
+    )
+
+    if search_query:
+        search_term = f"%{search_query}%"
+        # Search by meter name, topic, or associated equipment name
+        query = query.filter(
+            db.or_(
+                Meter.name.ilike(search_term),
+                Meter.mqtt_topic.ilike(search_term),
+                Equipment.name.ilike(search_term)
+            )
+        )
+
+    meters_list = query.order_by(Meter.name).all()
+    
+    return render_template(
+        'meters/index.html',
+        meters_list=meters_list,
+        search_query=search_query
+    )
+    
+@app.route('/meters/view/<int:meter_id>')
+@login_required
+@permission_required('CAN_VIEW_METERS')
+def view_meter(meter_id):
+    # Eagerly load related models to prevent extra database queries in the template.
+    # This fetches the meter, its equipment, and its location all in one go.
+    meter = Meter.query.options(
+        joinedload(Meter.equipment),
+        joinedload(Meter.location)
+    ).get_or_404(meter_id)
+
+    # --- Security Check ---
+    # Ensure the meter being viewed belongs to the currently logged-in user's company.
+    if meter.company_id != current_user.company_id:
+        abort(403) # Forbidden
+
+    return render_template('meters/view.html', meter=meter)
+
+@app.route('/meters/add', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_ADD_METERS')
+def add_meter():
+    if request.method == 'POST':
+        # --- 1. Form Validation ---
+        name = request.form.get('name', '').strip()
+        topic = request.form.get('mqtt_topic', '').strip()
+        equipment_id = request.form.get('equipment_id')
+
+        if not all([name, topic, equipment_id]):
+            flash('Meter Name, MQTT Topic, and Equipment are required fields.', 'danger')
+            return render_template('meters/form.html', form_data=get_meter_form_data(), meter=None)
+
+        # Check for unique MQTT topic across the entire system (topics are global)
+        if Meter.query.filter_by(mqtt_topic=topic).first():
+            flash(f'The MQTT Topic "{topic}" is already registered to another meter.', 'warning')
+            return render_template('meters/form.html', form_data=get_meter_form_data(), meter=None)
+
+        # --- 2. Create Meter Object ---
+        new_meter = Meter(
+            company_id=current_user.company_id,
+            name=name,
+            mqtt_topic=topic,
+            equipment_id=equipment_id,
+            location_id=request.form.get('location_id') or None,
+            is_active=True # Default new meters to active
+        )
+        
+        db.session.add(new_meter)
+        save_actions = []
+
+        try:
+            # --- Transactional Block ---
+            db.session.flush() # Flush to get the new_meter.id for file naming
+            
+            # Use our generic helper, passing 'meters' as the subdirectory name
+            saved_files, save_actions = process_uploads(new_meter, request.files, 'meters')
+            
+            new_meter.images = saved_files['images'] or []
+            new_meter.videos = saved_files['videos'] or []
+            new_meter.audio_files = saved_files['audio_files'] or []
+            new_meter.documents = saved_files['documents'] or []
+            
+            # --- 3. Commit to DB, then Save Files ---
+            db.session.commit()
+            for file, path in save_actions:
+                file.save(path)
+            
+            flash(f'Meter "{name}" has been registered successfully.', 'success')
+            return redirect(url_for('manage_meters'))
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'An error occurred while registering the meter: {e}', 'danger')
+            print(f"Error in add_meter: {e}") # For debugging
+
+    # For a GET request
+    return render_template('meters/form.html', form_data=get_meter_form_data(), meter=None)
+
+@app.route('/meters/edit/<int:meter_id>', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_EDIT_METERS')
+def edit_meter(meter_id):
+    meter = Meter.query.get_or_404(meter_id)
+    if meter.company_id != current_user.company_id:
+        abort(403)
+
+    if request.method == 'POST':
+        save_actions = []
+        try:
+            meter.name = request.form.get('name')
+            meter.mqtt_topic = request.form.get('mqtt_topic')
+            meter.equipment_id = request.form.get('equipment_id')
+            meter.location_id = request.form.get('location_id') or None
+            
+            # Handle new file uploads and append to existing
+            saved_files, save_actions = process_uploads(meter, request.files, 'meters')
+            if saved_files['images']: meter.images = (meter.images or []) + saved_files['images']
+            if saved_files['videos']: meter.videos = (meter.videos or []) + saved_files['videos']
+            if saved_files['audio_files']: meter.audio_files = (meter.audio_files or []) + saved_files['audio_files']
+            if saved_files['documents']: meter.documents = (meter.documents or []) + saved_files['documents']
+            
+            flag_modified(meter, "images"); flag_modified(meter, "videos");
+            flag_modified(meter, "audio_files"); flag_modified(meter, "documents");
+
+            db.session.commit()
+            for file, path in save_actions:
+                file.save(path)
+                
+            flash(f'Meter "{meter.name}" updated successfully.', 'success')
+            return redirect(url_for('manage_meters'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'An error occurred: {e}', 'danger')
+
+    return render_template('meters/form.html', form_data=get_meter_form_data(), meter=meter)
+
+@app.route('/meters/delete/<int:meter_id>', methods=['POST'])
+@login_required
+@permission_required('CAN_DELETE_METERS')
+def delete_meter(meter_id):
+    meter = Meter.query.get_or_404(meter_id)
+    if meter.company_id != current_user.company_id:
+        abort(403)
+    
+    try:
+        delete_all_uploads(meter, 'meters')
+        db.session.delete(meter)
+        db.session.commit()
+        flash(f'Meter "{meter.name}" has been deleted.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'An error occurred: {e}', 'danger')
+        
+    return redirect(url_for('manage_meters'))
+
+@app.route('/meters/<int:meter_id>/delete-media', methods=['POST'])
+@login_required
+@permission_required('CAN_EDIT_METERS')
+def delete_meter_media(meter_id):
+    meter = Meter.query.get_or_404(meter_id)
+    if meter.company_id != current_user.company_id:
+        abort(403)
+    
+    # This logic is now generic and safe
+    filename = request.form.get('filename')
+    file_type_key = request.form.get('file_type')
+    folder_map = {'images': 'images', 'videos': 'videos', 'audio_files': 'audio', 'documents': 'documents'}
+    folder_name = folder_map.get(file_type_key)
+
+    if not all([filename, file_type_key, folder_name]):
+        flash('Invalid request for file deletion.', 'danger')
+        return redirect(url_for('edit_meter', meter_id=meter_id))
+    
+    current_files = getattr(meter, file_type_key, [])
+    if filename in current_files:
+        try:
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'meters', folder_name, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            
+            current_files.remove(filename)
+            setattr(meter, file_type_key, current_files or [])
+            flag_modified(meter, file_type_key)
+            db.session.commit()
+            flash('File deleted successfully.', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error deleting file: {e}', 'danger')
+    else:
+        flash('File not found.', 'warning')
+        
+    return redirect(url_for('edit_meter', meter_id=meter_id))
+
+# --- ANALYTICS ROUTES ---
+
+@app.route('/analytics/meters')
+@login_required
+@permission_required('CAN_VIEW_REPORTS') # Reuse the reports permission
+def view_meter_analytics():
+    # Get all meters for the current company to populate the dropdown
+    meters = Meter.query.filter_by(company_id=current_user.company_id, is_active=True).order_by(Meter.name).all()
+    
+    return render_template('analytics/meters.html', meters=meters)
 
 # --- USER PROFILE ROUTE ---
 
@@ -4136,6 +4585,65 @@ def notification_logs():
 
     return render_template('notifications/index.html', logs=logs)
 
+# --- SOCKETIO EVENT HANDLERS ---
+
+@socketio.on('connect')
+def handle_connect():
+    """
+    Event handler for when a new client connects via WebSocket.
+    """
+    print('Client connected to WebSocket')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Event handler for when a client disconnects."""
+    print('Client disconnected from WebSocket')
+
+@socketio.on('subscribe')
+def handle_subscribe(data):
+    """
+    Handler for when a browser client wants to subscribe to a topic.
+    The client joins a 'room' named after the topic.
+    """
+    topic = data.get('topic')
+    if topic:
+        # Leave any previous room to only get messages for one topic at a time
+        previous_topic = session.get('mqtt_topic')
+        if previous_topic and previous_topic != topic:
+            leave_room(previous_topic)
+            print(f"Client left room: {previous_topic}")
+        
+        # Join the new room
+        join_room(topic)
+        session['mqtt_topic'] = topic
+        print(f'Client {request.sid} joined room: {topic}')
+
+@socketio.on('unsubscribe')
+def handle_unsubscribe():
+    """Handler for when a browser client unsubscribes."""
+    topic = session.pop('mqtt_topic', None)
+    if topic:
+        leave_room(topic)
+        print(f'Client {request.sid} left room: {topic}')
+
+# --- THIS IS THE NEW HANDLER ---
+@socketio.on('forward_mqtt_message')
+def handle_forward_mqtt_message(data):
+    """
+    This is a relay handler. It receives a message from our internal
+    MQTT client script and then broadcasts it to the correct room/topic
+    where browser clients are listening.
+    """
+    topic = data.get('topic')
+    payload = data.get('payload')
+    
+    if topic and payload:
+        # This is the SERVER-SIDE emit, which DOES have the 'room' argument.
+        # It sends an 'mqtt_message' event to all clients in the specified room.
+        emit('mqtt_message', payload, room=topic)
+        # Optional: uncomment the line below for very verbose logging
+        # print(f"Broadcasted MQTT message to room: {topic}")
+
 # --- SUPERADMIN ROUTES ---
 
 @app.route('/super-admin')
@@ -4287,4 +4795,4 @@ def cleanup_logs():
         print("Log cleanup complete.")
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8080)
+    socketio.run(app, debug=True, port=8080, allow_unsafe_werkzeug=True)

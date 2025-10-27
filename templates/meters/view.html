@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0">{{ meter.name }}</h1>
+            <p class="text-muted mb-0">MQTT Topic: <code>{{ meter.mqtt_topic }}</code></p>
+        </div>
+        <a href="{{ url_for('manage_meters') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Back to All Meters
+        </a>
+    </div>
+
+    {% include 'partials/_flash_messages.html' %}
+
+    <div class="row">
+        <!-- Main Content Column -->
+        <div class="col-lg-8">
+            <!-- Meter Details Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Meter Details</h5></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><strong>Associated Equipment:</strong> 
+                            {% if meter.equipment %}
+                                <a href="{{ url_for('view_equipment', equip_id=meter.equipment.id) }}">{{ meter.equipment.name }}</a>
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6 mb-3"><strong>Location:</strong> {{ meter.location.name if meter.location else 'N/A' }}</div>
+                        <div class="col-md-6 mb-3"><strong>Status:</strong> 
+                            {% if meter.is_active %}<span class="badge bg-success">Active</span>
+                            {% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+                        </div>
+                        <div class="col-md-6 mb-3"><strong>Registered On:</strong> {{ meter.created_at.strftime('%Y-%m-%d') }}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Media Attachments Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Datasheets & Files</h5></div>
+                <div class="card-body">
+                    {% set media_types = [('images', 'Images', meter.images), ('videos', 'Videos', meter.videos), ('audio', 'Audio Files', meter.audio_files), ('documents', 'Documents', meter.documents)] %}
+                    {% set has_media = false %}{% for folder, title, files in media_types %}{% if files %}{% set has_media = true %}{% endif %}{% endfor %}
+                    {% if has_media %}
+                        <div class="row gx-2 gy-2">
+                        {% for folder, title, files in media_types %}
+                            {% if files %}
+                                {% for filename in files %}
+                                <div class="col-auto">
+                                    <a href="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" target="_blank" class="text-decoration-none">
+                                        <div class="card h-100" style="width: 150px;">
+                                            <div class="text-center p-3">
+                                                {% if folder == 'images' %}<img src="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Preview">
+                                                {% elif folder == 'videos' %}<i class="bi bi-film fs-1"></i>
+                                                {% elif folder == 'audio' %}<i class="bi bi-music-note-beamed fs-1"></i>
+                                                {% else %}<i class="bi bi-file-earmark-text fs-1"></i>
+                                                {% endif %}
+                                            </div>
+                                            <div class="card-body p-2 text-center"><p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p></div>
+                                        </div>
+                                    </a>
+                                </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-muted">No files have been uploaded for this meter.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar Column -->
+        <div class="col-lg-4">
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
+                <div class="list-group list-group-flush">
+                    {% if has_permission('CAN_VIEW_REPORTS') %}
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="bi bi-bar-chart-line-fill me-2"></i>View Analytics
+                    </a>
+                    {% endif %}
+                    {% if has_permission('CAN_EDIT_METERS') %}
+                    <a href="{{ url_for('edit_meter', meter_id=meter.id) }}" class="list-group-item list-group-item-action"><i class="bi bi-pencil-square me-2"></i>Edit Meter</a>
+                    {% endif %}
+                    
+                    {% if has_permission('CAN_DELETE_METERS') %}
+                    <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal"><i class="bi bi-trash me-2"></i>Delete Meter</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deleteModalLabel">Confirm Deletion</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Are you sure you want to permanently delete the meter <strong>{{ meter.name }}</strong>?
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form action="{{ url_for('delete_meter', meter_id=meter.id) }}" method="POST">
+            <button type="submit" class="btn btn-danger">Yes, Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

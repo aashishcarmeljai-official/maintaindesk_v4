@@ -503,6 +503,86 @@ color: #000 !important;
 
 /*
 ================================================
+Print Styles
+================================================
+*/
+@media print {
+
+    /* Hide elements that should not be printed */
+    .sidebar,
+    .sidebar-footer,
+    .theme-toggle-container,
+    .btn, /* Hides all Bootstrap buttons */
+    .breadcrumb,
+    .d-print-none { /* A utility class you can add to anything else you want to hide */
+        display: none !important;
+    }
+
+    /* Ensure the main content takes up the full page width */
+    .main-content {
+        margin-left: 0 !important;
+        padding: 0 !important;
+    }
+
+    .card {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background-color: transparent !important;
+    }
+
+    /* Also remove padding from the card-body to bring content closer together */
+    .card-body {
+        padding: 0 !important;
+    }
+
+    .qr-code-bg {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background-color: transparent !important;
+    }
+
+    /* Ensure QR image itself is not inverted by dark mode filters */
+    .qr-code-img {
+        filter: none !important;
+    }
+
+    /* Optional: Ensure text is black for readability, overriding dark mode colors */
+    body, h1, h2, h3, h4, h5, h6, p, div, li, td, th {
+        color: #000 !important;
+        background-color: #fff !important;
+    }
+
+    a {
+        text-decoration: none !important;
+        color: #000 !important;
+    }
+    .mb-print-2 {
+        margin-bottom: 0.5rem !important;
+    }
+    .mb-print-3 {
+        margin-bottom: 1rem !important;
+    }
+}
+
+/*
+================================================
+Analytics Page Styles
+================================================
+*/
+.table-header-sticky th {
+    position: sticky;
+    top: 0;
+    /* Use the main background variable so it adapts to light/dark mode */
+    background-color: var(--bg-main); 
+    box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+/*
+================================================
 Dark Mode Component Overrides
 ================================================
 */
@@ -673,6 +753,14 @@ Dark Mode Component Overrides
 
     .status-btn.active.status-warning {
     color: #000; /* Keep black text on yellow for contrast */
+    }
+    .qr-code-img {
+        background-color: #fff !important; /* Keep the QR background white for scannability */
+        filter: invert(0.9) hue-rotate(180deg);
+    }
+    .qr-code-bg {
+        background-color: var(--content-bg-dark) !important; /* Use the dark card background color */
+        border-color: var(--border-dark) !important;
     }
 }
 
