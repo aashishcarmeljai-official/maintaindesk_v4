@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import io
 import csv
@@ -53,7 +56,7 @@ mail = Mail(app)
 
 # --- SOCKETIO INITIALIZATION ---
 # We use 'threading' for the dev server and will switch to eventlet for production.
-socketio = SocketIO(app, async_mode='threading')
+socketio = SocketIO(app)
 
 ADMIN_PASS_FILE = os.path.join(app.root_path, 'admin_password.json')
 ORG_DATA_FILE = os.path.join(app.root_path, 'o_d.json')
