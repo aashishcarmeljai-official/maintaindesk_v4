@@ -409,3 +409,17 @@ class Meter(db.Model):
     company = db.relationship('Company', backref=db.backref('meters', lazy=True))
     equipment = db.relationship('Equipment', backref=db.backref('meters', lazy=True))
     location = db.relationship('Location', backref=db.backref('meters', lazy=True))
+    
+class MeterReading(db.Model):
+    """Stores a single time-series reading from a Meter."""
+    __tablename__ = 'meter_readings'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    meter_id = db.Column(db.Integer, db.ForeignKey('meters.id'), nullable=False, index=True)
+    timestamp = db.Column(db.DateTime, nullable=False, index=True)
+    
+    # Use JSONB to store the variable data from the sensor payload
+    value = db.Column(JSONB, nullable=False)
+
+    # Relationship back to the meter
+    meter = db.relationship('Meter', backref=db.backref('readings', lazy='dynamic'))

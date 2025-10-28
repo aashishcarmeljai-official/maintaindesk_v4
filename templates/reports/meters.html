@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid p-4">
+    <h1 class="h3 mb-3">Meter Reports</h1>
+
+    <!-- Filter Card -->
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">Generate Report</h5></div>
+        <div class="card-body">
+            <form method="POST" id="reportForm">
+                <div class="row align-items-end g-2">
+                    <div class="col-md-3">
+                        <label for="meter_id" class="form-label">Select Meter <span class="text-danger">*</span></label>
+                        <select id="meter_id" name="meter_id" class="form-select" required>
+                            <option value="">-- Select a Meter --</option>
+                            {% for meter in meters %}
+                            <option value="{{ meter.id }}" {% if submitted_data.get('meter_id')|int == meter.id %}selected{% endif %}>{{ meter.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="start_date" class="form-label">Start Date</label>
+                        <input type="date" id="start_date" name="start_date" class="form-control" value="{{ submitted_data.get('start_date', '') }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="end_date" class="form-label">End Date</label>
+                        <input type="date" id="end_date" name="end_date" class="form-control" value="{{ submitted_data.get('end_date', '') }}">
+                    </div>
+                    <div class="col-md-2">
+                        <label for="plot_key" class="form-label">Value to Plot</label>
+                        <select id="plot_key" name="plot_key" class="form-select" {% if not available_keys %}disabled{% endif %}>
+                            {% if available_keys %}
+                                {% for key in available_keys %}
+                                <option value="{{ key }}" {% if submitted_data.get('plot_key') == key or (loop.first and not submitted_data.get('plot_key')) %}selected{% endif %}>
+                                    {{ key|replace('_', ' ')|title }}
+                                </option>
+                                {% endfor %}
+                            {% else %}
+                                <option disabled selected>-- Run Report First --</option>
+                            {% endif %}
+                        </select>
+                    </div>
+                    <div class="col-md-1">
+                        <button type="submit" class="btn btn-primary w-100">Run</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if request.method == 'POST' %}
+        {% if readings %}
+        <!-- Chart Card -->
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Readings Chart</h5></div>
+            <div class="card-body" style="height: 400px;">
+                <canvas id="meterChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Data Table Card -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Data Log</h5>
+                <form action="{{ url_for('export_meter_report') }}" method="POST">
+                    <input type="hidden" name="meter_id" value="{{ submitted_data.get('meter_id', '') }}">
+                    <input type="hidden" name="start_date" value="{{ submitted_data.get('start_date', '') }}">
+                    <input type="hidden" name="end_date" value="{{ submitted_data.get('end_date', '') }}">
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-download me-1"></i> Export as CSV</button>
+                </form>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive" style="max-height: 400px;">
+                    <table class="table table-sm table-striped">
+                        <thead class="table-header-sticky">
+                            <tr>
+                                <th>Timestamp</th>
+                                {% if readings and readings[0].value and readings[0].value.keys() %}
+                                    {% for key in readings[0].value.keys()|sort %}
+                                        <th>{{ key|replace('_', ' ')|title }}</th>
+                                    {% endfor %}
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for reading in readings %}
+                            <tr>
+                                <td>{{ reading.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                {% for key in readings[0].value.keys()|sort %}
+                                    <td>{{ reading.value.get(key, 'N/A') }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="card">
+            <div class="card-body text-center p-5">
+                <p class="text-muted mb-0">No data found for the selected criteria.</p>
+            </div>
+        </div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Chart.js for plotting -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const ctx = document.getElementById('meterChart');
+    if (ctx) {
+        // Use a try-catch block for safety in case of malformed JSON
+        try {
+            const chartData = JSON.parse('{{ chart_data | safe }}');
+            
+            if (chartData.labels && chartData.labels.length > 0) {
+                new Chart(ctx, {
+                    type: 'line',
+                    data: chartData,
+                    options: {
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    tooltipFormat: 'yyyy-MM-dd HH:mm:ss',
+                                    displayFormats: { hour: 'HH:mm', day: 'MMM dd' }
+                                },
+                                title: { display: true, text: 'Timestamp' }
+                            },
+                            y: {
+                                beginAtZero: false,
+                                title: { display: true, text: 'Value' }
+                            }
+                        },
+                        interaction: { mode: 'index', intersect: false },
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Could not parse chart data:", e);
+        }
+    }
+});
+</script>
+{% endblock %}

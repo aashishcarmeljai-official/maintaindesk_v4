@@ -82,9 +82,9 @@
             <div class="card">
                 <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
                 <div class="list-group list-group-flush">
-                    {% if has_permission('CAN_VIEW_REPORTS') %}
-                    <a href="#" class="list-group-item list-group-item-action">
-                        <i class="bi bi-bar-chart-line-fill me-2"></i>View Analytics
+                    {% if has_permission('CAN_VIEW_REPORTS') %}    
+                    <a href="{{ url_for('reports_meters', meter_id=meter.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-file-earmark-text-fill me-2"></i>View Reports
                     </a>
                     {% endif %}
                     {% if has_permission('CAN_EDIT_METERS') %}

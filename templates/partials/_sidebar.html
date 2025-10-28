@@ -19,6 +19,29 @@
                 <a class="sidebar-link" href="{{ url_for('manage_work_orders') }}"><i class="bi bi-wrench-adjustable-circle"></i><span>Work Orders</span></a>
             </li>
             {% endif %}
+
+            <!-- Users & Company Management -->
+            {% if has_permission('CAN_MANAGE_USERS') or has_permission('CAN_MANAGE_TEAMS') or has_permission('CAN_MANAGE_ROLES') %}
+            {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'invite_user', 'manage_roles', 'edit_role', 'create_role', 'manage_teams', 'add_team', 'edit_team'] %}
+            <li class="sidebar-item {% if request.endpoint in users_teams_endpoints %}active{% endif %}">
+                <a class="sidebar-link {{ '' if request.endpoint in users_teams_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#usersCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in users_teams_endpoints else 'false' }}" aria-controls="usersCollapse">
+                    <i class="bi bi-people-fill"></i><span>Users / Teams</span><i class="bi bi-chevron-down ms-auto"></i>
+                </a>
+                <div class="collapse {{ 'show' if request.endpoint in users_teams_endpoints }}" id="usersCollapse">
+                    <ul class="sidebar-submenu">
+                        {% if has_permission('CAN_MANAGE_USERS') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_users', 'add_user', 'edit_user', 'invite_user'] %}active{% endif %}"><a href="{{ url_for('manage_users') }}" class="sidebar-link">Users</a></li>
+                        {% endif %}
+                        {% if has_permission('CAN_MANAGE_TEAMS') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_teams', 'add_team', 'edit_team'] %}active{% endif %}"><a href="{{ url_for('manage_teams') }}" class="sidebar-link">Teams</a></li>
+                        {% endif %}
+                        {% if has_permission('CAN_MANAGE_ROLES') %}
+                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_roles', 'edit_role', 'create_role'] %}active{% endif %}"><a href="{{ url_for('manage_roles') }}" class="sidebar-link">Roles</a></li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </li>
+            {% endif %}
             
             <!-- Assets Dropdown -->
             {% if has_permission('CAN_MANAGE_ASSETS') %}
@@ -49,29 +72,6 @@
                 </a>
             </li>
             {% endif %}
-
-            <!-- Users & Company Management -->
-            {% if has_permission('CAN_MANAGE_USERS') or has_permission('CAN_MANAGE_TEAMS') or has_permission('CAN_MANAGE_ROLES') %}
-            {% set users_teams_endpoints = ['manage_users', 'add_user', 'edit_user', 'invite_user', 'manage_roles', 'edit_role', 'create_role', 'manage_teams', 'add_team', 'edit_team'] %}
-            <li class="sidebar-item {% if request.endpoint in users_teams_endpoints %}active{% endif %}">
-                <a class="sidebar-link {{ '' if request.endpoint in users_teams_endpoints else 'collapsed' }}" data-bs-toggle="collapse" href="#usersCollapse" role="button" aria-expanded="{{ 'true' if request.endpoint in users_teams_endpoints else 'false' }}" aria-controls="usersCollapse">
-                    <i class="bi bi-people-fill"></i><span>Users / Teams</span><i class="bi bi-chevron-down ms-auto"></i>
-                </a>
-                <div class="collapse {{ 'show' if request.endpoint in users_teams_endpoints }}" id="usersCollapse">
-                    <ul class="sidebar-submenu">
-                        {% if has_permission('CAN_MANAGE_USERS') %}
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_users', 'add_user', 'edit_user', 'invite_user'] %}active{% endif %}"><a href="{{ url_for('manage_users') }}" class="sidebar-link">Users</a></li>
-                        {% endif %}
-                        {% if has_permission('CAN_MANAGE_TEAMS') %}
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_teams', 'add_team', 'edit_team'] %}active{% endif %}"><a href="{{ url_for('manage_teams') }}" class="sidebar-link">Teams</a></li>
-                        {% endif %}
-                        {% if has_permission('CAN_MANAGE_ROLES') %}
-                        <li class="sidebar-submenu-item {% if request.endpoint in ['manage_roles', 'edit_role', 'create_role'] %}active{% endif %}"><a href="{{ url_for('manage_roles') }}" class="sidebar-link">Roles</a></li>
-                        {% endif %}
-                    </ul>
-                </div>
-            </li>
-            {% endif %}
             
             <!-- Other Main Links -->
             {% if has_permission('CAN_MANAGE_DEPARTMENTS') %}<li class="sidebar-item {% if request.endpoint == 'manage_departments' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_departments') }}"><i class="bi bi-building"></i><span>Departments</span></a></li>{% endif %}
@@ -80,23 +80,18 @@
             {% if has_permission('CAN_MANAGE_LOCATIONS') %}<li class="sidebar-item {% if request.endpoint in ['manage_locations', 'add_location', 'edit_location'] %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_locations') }}"><i class="bi bi-geo-alt-fill"></i><span>Locations</span></a></li>{% endif %}
             {% if has_permission('CAN_MANAGE_UNITS') %}<li class="sidebar-item {% if request.endpoint == 'manage_units' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_units') }}"><i class="bi bi-rulers"></i><span>Units & Measurement</span></a></li>{% endif %}
             {% if has_permission('CAN_MANAGE_CURRENCIES') %}<li class="sidebar-item {% if request.endpoint == 'manage_currencies' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('manage_currencies') }}"><i class="bi bi-cash-coin"></i><span>Currencies</span></a></li>{% endif %}
-            {% if has_permission('CAN_VIEW_REPORTS') %}
-            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-person-check-fill"></i><span>Technician Performance</span></a></li>
-            {% endif %}
 
             <!-- Section Separator: Analytics -->
             {% if has_permission('CAN_VIEW_REPORTS') %}
             <li class="sidebar-section-header">Analytics & Reports</li>
             <li class="sidebar-item"><a class="sidebar-link" href="{{ url_for('view_meter_analytics') }}"><i class="bi bi-pie-chart-fill"></i><span>Analytics</span></a></li>
-            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-file-earmark-text-fill"></i><span>Reports</span></a></li>
+            <li class="sidebar-item {% if request.endpoint == 'reports_meters' %}active{% endif %}">
+                <a class="sidebar-link" href="{{ url_for('reports_meters') }}"><i class="bi bi-file-earmark-text-fill"></i><span>Reports</span></a>
+            </li>
             {% endif %}
 
             <!-- Section Separator: System -->
             <li class="sidebar-section-header">System & Notifications</li>
-            
-            {% if has_permission('CAN_SEND_BROADCASTS') %}
-            <li class="sidebar-item"><a class="sidebar-link" href="#"><i class="bi bi-broadcast"></i><span>Emergency Broadcast</span></a></li>
-            {% endif %}
             
             <li class="sidebar-item {% if request.endpoint == 'notification_logs' %}active{% endif %}"><a class="sidebar-link" href="{{ url_for('notification_logs') }}"><i class="bi bi-bell-fill"></i><span>Notification Logs</span></a></li>
             

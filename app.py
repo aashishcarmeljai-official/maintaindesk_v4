@@ -11,6 +11,7 @@ import qrcode
 import base64
 import random
 import string
+import pandas as pd
 from flask_mail import Mail, Message
 from functools import wraps
 from dotenv import load_dotenv
@@ -20,7 +21,7 @@ from flask import flash as flask_flash, g
 from flask_session import Session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, user_logged_in
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from models import db, bcrypt, User, Company, Role, Location, Permission, Category, Department, Equipment, Unit, Currency, InventoryItem, Vendor, VendorContact, Team, team_members, NotificationLog, WorkOrder, MqttConfig, Meter
+from models import db, bcrypt, User, Company, Role, Location, Permission, Category, Department, Equipment, Unit, Currency, InventoryItem, Vendor, VendorContact, Team, team_members, NotificationLog, WorkOrder, MqttConfig, Meter, MeterReading
 from sqlalchemy import func, cast, text, case
 import pycountry
 from sqlalchemy.orm.attributes import flag_modified
@@ -56,7 +57,6 @@ mail = Mail(app)
 
 # --- SOCKETIO INITIALIZATION ---
 socketio = SocketIO(app, cors_allowed_origins=["https://maintaindesk.com", "https://www.maintaindesk.com"])
-
 ADMIN_PASS_FILE = os.path.join(app.root_path, 'admin_password.json')
 ORG_DATA_FILE = os.path.join(app.root_path, 'o_d.json')
 
@@ -4628,23 +4628,177 @@ def handle_unsubscribe():
         leave_room(topic)
         print(f'Client {request.sid} left room: {topic}')
 
-# --- THIS IS THE NEW HANDLER ---
 @socketio.on('forward_mqtt_message')
 def handle_forward_mqtt_message(data):
     """
-    This is a relay handler. It receives a message from our internal
-    MQTT client script and then broadcasts it to the correct room/topic
-    where browser clients are listening.
+    Relays message to browser clients AND logs it to the database.
     """
     topic = data.get('topic')
     payload = data.get('payload')
     
-    if topic and payload:
-        # This is the SERVER-SIDE emit, which DOES have the 'room' argument.
-        # It sends an 'mqtt_message' event to all clients in the specified room.
-        emit('mqtt_message', payload, room=topic)
-        # Optional: uncomment the line below for very verbose logging
-        # print(f"Broadcasted MQTT message to room: {topic}")
+    if not topic or not payload:
+        return # Ignore invalid messages
+
+    # --- 1. Broadcast the message in real-time (existing logic) ---
+    emit('mqtt_message', payload, room=topic)
+    # print(f"Broadcasted MQTT message to room: {topic}")
+
+    # --- 2. NEW: Log the message to the database ---
+    try:
+        # Find the corresponding Meter in the database by its unique topic
+        meter = Meter.query.filter_by(mqtt_topic=topic).first()
+        
+        if meter:
+            # The payload from your sensor already has a 'timestamp'
+            # We need to convert the Unix timestamp to a Python datetime object
+            ts = payload.get('timestamp')
+            if ts is None:
+                # Fallback if the sensor doesn't provide a timestamp
+                reading_timestamp = datetime.now(timezone.utc)
+            else:
+                reading_timestamp = datetime.fromtimestamp(ts, tz=timezone.utc)
+
+            # Create the new log entry
+            reading = MeterReading(
+                meter_id=meter.id,
+                timestamp=reading_timestamp,
+                value=payload # Store the entire JSON payload
+            )
+            db.session.add(reading)
+            db.session.commit()
+        else:
+            # This is a useful warning for your server logs
+            print(f"Warning: Received MQTT message on an unregistered topic: {topic}")
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error saving meter reading to database: {e}")
+        
+# --- REPORTS ROUTES ---
+
+@app.route('/reports/meters', methods=['GET', 'POST'])
+@login_required
+@permission_required('CAN_VIEW_REPORTS')
+def reports_meters():
+    company_id = current_user.company_id
+    meters = Meter.query.filter_by(company_id=company_id, is_active=True).order_by(Meter.name).all()
+    
+    readings = []
+    chart_data = json.dumps({})
+    available_keys = []
+    
+    # --- THIS IS THE MAIN CHANGE: Handle both GET and POST ---
+    # Determine the source of the filter data (form for POST, URL args for GET)
+    source_data = request.form if request.method == 'POST' else request.args
+
+    # Populate submitted_data from the determined source
+    submitted_data = {
+        'meter_id': source_data.get('meter_id', ''),
+        'start_date': source_data.get('start_date', ''),
+        'end_date': source_data.get('end_date', ''),
+        'plot_key': source_data.get('plot_key', '')
+    }
+    
+    meter_id = source_data.get('meter_id', type=int)
+    start_date_str = source_data.get('start_date')
+    end_date_str = source_data.get('end_date')
+    plot_key = source_data.get('plot_key')
+    
+    # --- Run the report if a meter_id is present from either method ---
+    if meter_id:
+        query = MeterReading.query.filter_by(meter_id=meter_id)
+        
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            query = query.filter(MeterReading.timestamp >= start_date)
+        if end_date_str:
+            end_date = (datetime.strptime(end_date_str, '%Y-%m-%d') + timedelta(days=1)).replace(tzinfo=timezone.utc)
+            query = query.filter(MeterReading.timestamp < end_date)
+        
+        readings = query.order_by(MeterReading.timestamp.asc()).all()
+        
+        if readings:
+            all_keys = set()
+            for r in readings:
+                if isinstance(r.value, dict):
+                    for key, value in r.value.items():
+                        if isinstance(value, (int, float)):
+                            all_keys.add(key)
+            available_keys = sorted(list(all_keys))
+            
+            if not plot_key and available_keys:
+                plot_key = available_keys[0]
+                submitted_data['plot_key'] = plot_key
+            
+            if plot_key and plot_key in available_keys:
+                labels = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
+                values = [r.value.get(plot_key) for r in readings]
+                
+                chart_data = json.dumps({
+                    'labels': labels,
+                    'datasets': [{
+                        'label': plot_key.replace('_', ' ').title(),
+                        'data': values,
+                        'borderColor': '#3f8efc',
+                        'backgroundColor': 'rgba(63, 142, 252, 0.1)',
+                        'fill': True,
+                        'tension': 0.1
+                    }]
+                })
+
+    return render_template('reports/meters.html', 
+                          meters=meters, 
+                          readings=readings, 
+                          chart_data=chart_data, 
+                          submitted_data=submitted_data,
+                          available_keys=available_keys)
+
+@app.route('/reports/meters/export', methods=['POST'])
+@login_required
+@permission_required('CAN_VIEW_REPORTS')
+def export_meter_report():
+    # This route uses the same form data as the main report page
+    meter_id = request.form.get('meter_id', type=int)
+    start_date_str = request.form.get('start_date')
+    end_date_str = request.form.get('end_date')
+    
+    if not meter_id:
+        flash('Please select a meter to export.', 'danger')
+        return redirect(url_for('reports_meters'))
+        
+    query = MeterReading.query.filter_by(meter_id=meter_id)
+    if start_date_str:
+        query = query.filter(MeterReading.timestamp >= datetime.strptime(start_date_str, '%Y-%m-%d'))
+    if end_date_str:
+        query = query.filter(MeterReading.timestamp < (datetime.strptime(end_date_str, '%Y-%m-%d') + timedelta(days=1)))
+        
+    readings = query.order_by(MeterReading.timestamp.asc()).all()
+    meter = Meter.query.get(meter_id)
+
+    if not readings:
+        flash('No data found for the selected criteria to export.', 'warning')
+        return redirect(url_for('reports_meters'))
+
+    # --- Use Pandas to create the CSV in memory ---
+    # Flatten the JSON 'value' column into separate columns
+    data_for_df = []
+    for r in readings:
+        flat_row = {'timestamp': r.timestamp.strftime('%Y-%m-%d %H:%M:%S')}
+        flat_row.update(r.value) # Merge the JSON dict into the row
+        data_for_df.append(flat_row)
+
+    df = pd.DataFrame(data_for_df)
+    
+    # Create the CSV string
+    csv_data = df.to_csv(index=False)
+    
+    filename = f"meter_report_{meter.name.replace(' ', '_')}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+    
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename={filename}"}
+    )
 
 # --- SUPERADMIN ROUTES ---
 
