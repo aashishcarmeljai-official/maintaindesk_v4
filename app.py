@@ -55,8 +55,7 @@ app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER')
 mail = Mail(app)
 
 # --- SOCKETIO INITIALIZATION ---
-# We use 'threading' for the dev server and will switch to eventlet for production.
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins=["https://maintaindesk.com", "https://www.maintaindesk.com"])
 
 ADMIN_PASS_FILE = os.path.join(app.root_path, 'admin_password.json')
 ORG_DATA_FILE = os.path.join(app.root_path, 'o_d.json')
