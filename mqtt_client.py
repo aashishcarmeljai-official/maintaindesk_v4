@@ -12,7 +12,7 @@ load_dotenv()
 
 # --- CONFIGURATION ---
 # This client needs to know where your Flask-SocketIO server is running
-SOCKETIO_URL = 'http://127.0.0.1:8080' # Use the local address Gunicorn is bound to
+SOCKETIO_URL = 'http://127.0.0.1:5000' # Use the local address Gunicorn is bound to
 
 # This client also needs to connect to the database to get MQTT config and topics
 DATABASE_URI = os.getenv("DATABASE_URI")
