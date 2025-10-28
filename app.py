@@ -4798,4 +4798,4 @@ def cleanup_logs():
         print("Log cleanup complete.")
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, port=8080, allow_unsafe_werkzeug=True)
+    socketio.run(app, debug=True, port=8000, allow_unsafe_werkzeug=True)
