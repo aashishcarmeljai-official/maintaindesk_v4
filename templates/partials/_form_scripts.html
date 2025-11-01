@@ -3,6 +3,8 @@
 <script src="{{ url_for('static', filename='js/mediaCapture.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('Form scripts loaded');
+    
     // --- PART 1: PAGE-SPECIFIC INITIALIZATION ---
 
     // Generic ID Generation (Handles Equipment and Inventory)
@@ -73,10 +75,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // --- PRE-SELECTION LOGIC ---
-    // This script will run on any form that includes this partial
-    const preselectedEquipmentId = '{{ preselected_equipment_id or '' }}';
+    const preselectedEquipmentId = '{{ preselected_equipment_id or "" }}';
     if (preselectedEquipmentId && tomSelects['equipment_id']) {
-        // Use a short timeout to ensure TomSelect is fully initialized
         setTimeout(() => {
             tomSelects['equipment_id'].setValue(preselectedEquipmentId);
         }, 100);
@@ -88,15 +88,19 @@ document.addEventListener('DOMContentLoaded', function() {
     function setupFilePreview(inputId, previewContainerId) {
         const fileInput = document.getElementById(inputId);
         const previewContainer = document.getElementById(previewContainerId);
+        
         if (!fileInput || !previewContainer) {
             console.log(`Preview setup skipped for ${inputId} - element not found`);
-            return null; // Return null if not found
+            return null;
         }
+        
+        console.log(`Setting up preview for ${inputId}`);
         
         let fileStore = new DataTransfer();
 
         fileInput.addEventListener('change', function(event) {
             const files = event.target.files;
+            console.log(`${inputId} changed, ${files.length} files selected`);
             for (let i = 0; i < files.length; i++) {
                 fileStore.items.add(files[i]);
             }
@@ -106,6 +110,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function renderPreviews() {
             previewContainer.innerHTML = '';
+            console.log(`Rendering ${fileStore.files.length} previews for ${inputId}`);
             
             Array.from(fileStore.files).forEach((file, index) => {
                 const wrapper = document.createElement('div');
@@ -159,6 +164,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Return an object with a method to add files externally
         return {
             addFile: function(file) {
+                console.log(`Adding file externally to ${inputId}:`, file.name);
                 fileStore.items.add(file);
                 fileInput.files = fileStore.files;
                 renderPreviews();
@@ -167,6 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Initialize preview handlers and store them globally for mediaCapture.js
+    console.log('Initializing preview handlers...');
     window.previewHandlers = {
         images: setupFilePreview('images', 'images-preview'),
         videos: setupFilePreview('videos', 'videos-preview'),
@@ -176,6 +183,15 @@ document.addEventListener('DOMContentLoaded', function() {
     
     console.log('Preview handlers initialized:', window.previewHandlers);
     
+    // Log which handlers were successfully created
+    Object.keys(window.previewHandlers).forEach(key => {
+        if (window.previewHandlers[key]) {
+            console.log(`✓ ${key} handler created successfully`);
+        } else {
+            console.log(`✗ ${key} handler failed - input or container not found`);
+        }
+    });
+    
     // Generic event listener for deleting existing media files
     document.querySelectorAll('.existing-media-delete-btn').forEach(button => {
         button.addEventListener('click', function(event) {
@@ -184,5 +200,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+    
+    console.log('Form scripts initialization complete');
 });
 </script>

@@ -275,6 +275,13 @@ def create_default_roles_and_permissions(company_id):
     )
     system_reporter.set_password(uuid.uuid4().hex) # Set a secure, random, unknown password
     db.session.add(system_reporter)
+    
+    default_mqtt_config = MqttConfig(
+        company_id=company_id,
+        host='broker.hivemq.com',
+        port=1883
+    )
+    db.session.add(default_mqtt_config)
     db.session.commit()
 
 @login_manager.user_loader
@@ -4263,60 +4270,69 @@ def view_meter(meter_id):
 @permission_required('CAN_ADD_METERS')
 def add_meter():
     if request.method == 'POST':
-        # --- 1. Form Validation ---
+        # --- Form Data Validation ---
         name = request.form.get('name', '').strip()
         topic = request.form.get('mqtt_topic', '').strip()
         equipment_id = request.form.get('equipment_id')
-
+        
         if not all([name, topic, equipment_id]):
             flash('Meter Name, MQTT Topic, and Equipment are required fields.', 'danger')
             return render_template('meters/form.html', form_data=get_meter_form_data(), meter=None)
-
+        
         # Check for unique MQTT topic across the entire system (topics are global)
         if Meter.query.filter_by(mqtt_topic=topic).first():
             flash(f'The MQTT Topic "{topic}" is already registered to another meter.', 'warning')
             return render_template('meters/form.html', form_data=get_meter_form_data(), meter=None)
-
-        # --- 2. Create Meter Object ---
+        
+        # Create the initial Meter object without file data
         new_meter = Meter(
             company_id=current_user.company_id,
             name=name,
             mqtt_topic=topic,
             equipment_id=equipment_id,
             location_id=request.form.get('location_id') or None,
-            is_active=True # Default new meters to active
+            is_active=True
         )
         
         db.session.add(new_meter)
-        save_actions = []
-
+        save_actions = []  # Initialize an empty list to hold file saving functions
         try:
-            # --- Transactional Block ---
-            db.session.flush() # Flush to get the new_meter.id for file naming
+            # Flush the session to assign an ID to new_meter.
+            # This ID is crucial for creating unique filenames.
+            db.session.flush()
             
-            # Use our generic helper, passing 'meters' as the subdirectory name
+            # This now returns TWO values: filenames for the DB, and actions to run on success
             saved_files, save_actions = process_uploads(new_meter, request.files, 'meters')
             
+            # Update the object with the lists of filenames (or empty lists if none)
             new_meter.images = saved_files['images'] or []
             new_meter.videos = saved_files['videos'] or []
             new_meter.audio_files = saved_files['audio_files'] or []
             new_meter.documents = saved_files['documents'] or []
             
-            # --- 3. Commit to DB, then Save Files ---
+            # --- Transactional Step 1: Commit to Database ---
+            # If this fails, the 'except' block will be triggered and no files will be saved.
             db.session.commit()
-            for file, path in save_actions:
-                file.save(path)
             
-            flash(f'Meter "{name}" has been registered successfully.', 'success')
-            return redirect(url_for('manage_meters'))
-
+            # --- Transactional Step 2: Save Files to Disk ---
+            # This code only runs if the database commit was successful.
+            for file, save_path in save_actions:
+                file.save(save_path)
+            
+            flash(f'Meter "{new_meter.name}" created successfully.', 'success')
+        
         except Exception as e:
+            # If any part of the process fails, roll back the database transaction
             db.session.rollback()
-            flash(f'An error occurred while registering the meter: {e}', 'danger')
-            print(f"Error in add_meter: {e}") # For debugging
-
-    # For a GET request
+            flash(f'An error occurred while creating the meter: {e}', 'danger')
+            # For debugging, you might want to log the full error
+            print(f"Error in add_meter: {e}")
+        
+        return redirect(url_for('manage_meters'))
+    
+    # For a GET request, just show the blank form
     return render_template('meters/form.html', form_data=get_meter_form_data(), meter=None)
+
 
 @app.route('/meters/edit/<int:meter_id>', methods=['GET', 'POST'])
 @login_required
@@ -4325,35 +4341,50 @@ def edit_meter(meter_id):
     meter = Meter.query.get_or_404(meter_id)
     if meter.company_id != current_user.company_id:
         abort(403)
-
+    
     if request.method == 'POST':
-        save_actions = []
+        save_actions = []  # Initialize here
         try:
+            # --- 1. Update text-based fields ---
             meter.name = request.form.get('name')
             meter.mqtt_topic = request.form.get('mqtt_topic')
             meter.equipment_id = request.form.get('equipment_id')
             meter.location_id = request.form.get('location_id') or None
             
-            # Handle new file uploads and append to existing
-            saved_files, save_actions = process_uploads(meter, request.files, 'meters')
-            if saved_files['images']: meter.images = (meter.images or []) + saved_files['images']
-            if saved_files['videos']: meter.videos = (meter.videos or []) + saved_files['videos']
-            if saved_files['audio_files']: meter.audio_files = (meter.audio_files or []) + saved_files['audio_files']
-            if saved_files['documents']: meter.documents = (meter.documents or []) + saved_files['documents']
+            # --- 2. Handle new file uploads ---
+            # Call the generic helper and unpack BOTH return values
+            newly_saved_files, save_actions = process_uploads(meter, request.files, 'meters')
             
-            flag_modified(meter, "images"); flag_modified(meter, "videos");
-            flag_modified(meter, "audio_files"); flag_modified(meter, "documents");
-
+            # Merge new filenames with existing ones
+            if newly_saved_files['images']:
+                meter.images = (meter.images or []) + newly_saved_files['images']
+            if newly_saved_files['videos']:
+                meter.videos = (meter.videos or []) + newly_saved_files['videos']
+            if newly_saved_files['audio_files']:
+                meter.audio_files = (meter.audio_files or []) + newly_saved_files['audio_files']
+            if newly_saved_files['documents']:
+                meter.documents = (meter.documents or []) + newly_saved_files['documents']
+            
+            # Flag the JSONB fields as modified
+            flag_modified(meter, "images")
+            flag_modified(meter, "videos")
+            flag_modified(meter, "audio_files")
+            flag_modified(meter, "documents")
+            
+            # --- 3. Commit DB changes, then save files ---
             db.session.commit()
-            for file, path in save_actions:
-                file.save(path)
+            for file, save_path in save_actions:
+                file.save(save_path)
                 
             flash(f'Meter "{meter.name}" updated successfully.', 'success')
-            return redirect(url_for('manage_meters'))
         except Exception as e:
             db.session.rollback()
-            flash(f'An error occurred: {e}', 'danger')
-
+            flash(f'An error occurred while updating the meter: {e}', 'danger')
+            print(f"Error in edit_meter: {e}")  # For debugging
+        
+        return redirect(url_for('manage_meters'))
+    
+    # For a GET request
     return render_template('meters/form.html', form_data=get_meter_form_data(), meter=meter)
 
 @app.route('/meters/delete/<int:meter_id>', methods=['POST'])
@@ -4591,22 +4622,14 @@ def notification_logs():
 
 @socketio.on('connect')
 def handle_connect():
-    """
-    Event handler for when a new client connects via WebSocket.
-    """
     print('Client connected to WebSocket')
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    """Event handler for when a client disconnects."""
     print('Client disconnected from WebSocket')
 
 @socketio.on('subscribe')
 def handle_subscribe(data):
-    """
-    Handler for when a browser client wants to subscribe to a topic.
-    The client joins a 'room' named after the topic.
-    """
     topic = data.get('topic')
     if topic:
         # Leave any previous room to only get messages for one topic at a time
@@ -4622,7 +4645,6 @@ def handle_subscribe(data):
 
 @socketio.on('unsubscribe')
 def handle_unsubscribe():
-    """Handler for when a browser client unsubscribes."""
     topic = session.pop('mqtt_topic', None)
     if topic:
         leave_room(topic)
@@ -4630,9 +4652,6 @@ def handle_unsubscribe():
 
 @socketio.on('forward_mqtt_message')
 def handle_forward_mqtt_message(data):
-    """
-    Relays message to browser clients AND logs it to the database.
-    """
     topic = data.get('topic')
     payload = data.get('payload')
     

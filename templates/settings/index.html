@@ -114,7 +114,7 @@
                             </div>
                             <div class="col-md-4 mb-3">
                                 <label for="mqtt_port" class="form-label">Port <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="mqtt_port" name="mqtt_port" value="{{ mqtt_config.port or '1883' }}" required>
+                                <input type="number" class="form-control" id="mqtt_port" name="mqtt_port" value="{{ mqtt_config.port or '' }}" required>
                             </div>
                         </div>
                         <div class="row">

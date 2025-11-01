@@ -180,7 +180,8 @@ class Equipment(db.Model):
     category = db.relationship('Category', backref=db.backref('equipment', lazy=True))
     location = db.relationship('Location', backref=db.backref('equipment', lazy=True))
     department = db.relationship('Department', backref=db.backref('equipment', lazy=True))
-    manufacturer = db.relationship('Vendor', backref=db.backref('manufactured_equipment', lazy=True))
+    manufacturer = db.relationship('Vendor', foreign_keys=[manufacturer_id], backref=db.backref('manufactured_equipment', lazy=True))
+    meters = db.relationship('Meter', backref='equipment', lazy='dynamic', cascade="all, delete-orphan")
     
 class Unit(db.Model):
     """Represents a unit of measurement (e.g., meter, kilogram)."""
@@ -407,8 +408,8 @@ class Meter(db.Model):
 
     # Relationships
     company = db.relationship('Company', backref=db.backref('meters', lazy=True))
-    equipment = db.relationship('Equipment', backref=db.backref('meters', lazy=True))
     location = db.relationship('Location', backref=db.backref('meters', lazy=True))
+    readings = db.relationship('MeterReading', backref='meter', lazy='dynamic', cascade="all, delete-orphan")
     
 class MeterReading(db.Model):
     """Stores a single time-series reading from a Meter."""
@@ -420,6 +421,3 @@ class MeterReading(db.Model):
     
     # Use JSONB to store the variable data from the sensor payload
     value = db.Column(JSONB, nullable=False)
-
-    # Relationship back to the meter
-    meter = db.relationship('Meter', backref=db.backref('readings', lazy='dynamic'))

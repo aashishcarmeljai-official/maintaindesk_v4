@@ -32,10 +32,13 @@
                         </div>
                         <div class="col-md-6 mb-3"><strong>Location:</strong> {{ meter.location.name if meter.location else 'N/A' }}</div>
                         <div class="col-md-6 mb-3"><strong>Status:</strong> 
-                            {% if meter.is_active %}<span class="badge bg-success">Active</span>
-                            {% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+                            {% if meter.is_active %}
+                                <span class="badge bg-success">Active</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
                         </div>
-                        <div class="col-md-6 mb-3"><strong>Registered On:</strong> {{ meter.created_at.strftime('%Y-%m-%d') }}</div>
+                        <div class="col-md-6 mb-3"><strong>Registered On:</strong> {{ meter.created_at.strftime('%Y-%m-%d') if meter.created_at else 'N/A' }}</div>
                     </div>
                 </div>
             </div>
@@ -44,34 +47,58 @@
             <div class="card mb-4">
                 <div class="card-header"><h5 class="mb-0">Datasheets & Files</h5></div>
                 <div class="card-body">
-                    {% set media_types = [('images', 'Images', meter.images), ('videos', 'Videos', meter.videos), ('audio', 'Audio Files', meter.audio_files), ('documents', 'Documents', meter.documents)] %}
-                    {% set has_media = false %}{% for folder, title, files in media_types %}{% if files %}{% set has_media = true %}{% endif %}{% endfor %}
-                    {% if has_media %}
-                        <div class="row gx-2 gy-2">
+                    {% set media_types = [
+                        ('images', 'Images', meter.images),
+                        ('videos', 'Videos', meter.videos),
+                        ('audio', 'Audio Files', meter.audio_files),
+                        ('documents', 'Documents', meter.documents)
+                    ] %}
+                    
+                    {% if meter.images or meter.videos or meter.audio_files or meter.documents %}
                         {% for folder, title, files in media_types %}
                             {% if files %}
-                                {% for filename in files %}
-                                <div class="col-auto">
-                                    <a href="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" target="_blank" class="text-decoration-none">
+                                <h6 class="mt-3">{{ title }}</h6>
+                                <div class="row gx-2 gy-2">
+                                    {% for filename in files %}
+                                    <div class="col-auto">
                                         <div class="card h-100" style="width: 150px;">
-                                            <div class="text-center p-3">
-                                                {% if folder == 'images' %}<img src="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Preview">
-                                                {% elif folder == 'videos' %}<i class="bi bi-film fs-1"></i>
-                                                {% elif folder == 'audio' %}<i class="bi bi-music-note-beamed fs-1"></i>
-                                                {% else %}<i class="bi bi-file-earmark-text fs-1"></i>
+                                            <!-- Preview Section -->
+                                            <a href="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" target="_blank" class="text-center p-3">
+                                                {% if folder == 'images' %}
+                                                    <img src="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" class="img-fluid rounded" alt="Image preview" style="object-fit: cover; height: 80px;">
+                                                {% elif folder == 'videos' %}
+                                                    <i class="bi bi-film fs-1"></i>
+                                                {% elif folder == 'audio' %}
+                                                    <i class="bi bi-music-note-beamed fs-1"></i>
+                                                {% else %}
+                                                    <i class="bi bi-file-earmark-text fs-1"></i>
                                                 {% endif %}
+                                            </a>
+                                            <!-- Card Body with Filename -->
+                                            <div class="card-body p-2 text-center">
+                                                <p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">
+                                                    <a href="{{ url_for('static', filename='uploads/meters/' + folder + '/' + filename) }}" target="_blank" class="text-decoration-none">
+                                                        {{ filename.split('_')[-1] }}
+                                                    </a>
+                                                </p>
                                             </div>
-                                            <div class="card-body p-2 text-center"><p class="card-text small text-truncate" title="{{ filename.split('_')[-1] }}">{{ filename.split('_')[-1] }}</p></div>
                                         </div>
-                                    </a>
+                                    </div>
+                                    {% endfor %}
                                 </div>
-                                {% endfor %}
                             {% endif %}
                         {% endfor %}
-                        </div>
                     {% else %}
                         <p class="text-muted">No files have been uploaded for this meter.</p>
                     {% endif %}
+                </div>
+            </div>
+
+            <!-- Recent Reports Card -->
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="mb-0">Recent Reports</h5></div>
+                <div class="card-body">
+                    <p class="text-muted">Report history will be displayed here.</p>
                 </div>
             </div>
         </div>
@@ -82,17 +109,26 @@
             <div class="card">
                 <div class="card-header"><h5 class="mb-0">Quick Actions</h5></div>
                 <div class="list-group list-group-flush">
-                    {% if has_permission('CAN_VIEW_REPORTS') %}    
-                    <a href="{{ url_for('reports_meters', meter_id=meter.id) }}" class="list-group-item list-group-item-action">
-                        <i class="bi bi-file-earmark-text-fill me-2"></i>View Reports
+                    {% if has_permission('CAN_EDIT_METERS') %}
+                    <a href="{{ url_for('edit_meter', meter_id=meter.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-pencil-square me-2"></i>Edit Meter
                     </a>
                     {% endif %}
-                    {% if has_permission('CAN_EDIT_METERS') %}
-                    <a href="{{ url_for('edit_meter', meter_id=meter.id) }}" class="list-group-item list-group-item-action"><i class="bi bi-pencil-square me-2"></i>Edit Meter</a>
+
+                    {% if has_permission('CAN_VIEW_REPORTS') %}    
+                    <a href="{{ url_for('reports_meters', meter_id=meter.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-bar-chart-line me-2"></i>View Reports
+                    </a>
                     {% endif %}
+
+                    <a href="{{ url_for('view_equipment', equip_id=meter.equipment.id) }}" class="list-group-item list-group-item-action">
+                        <i class="bi bi-gear me-2"></i>View Associated Equipment
+                    </a>
                     
                     {% if has_permission('CAN_DELETE_METERS') %}
-                    <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal"><i class="bi bi-trash me-2"></i>Delete Meter</a>
+                    <a href="#" class="list-group-item list-group-item-action text-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                        <i class="bi bi-trash me-2"></i>Delete Meter
+                    </a>
                     {% endif %}
                 </div>
             </div>
@@ -109,7 +145,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        Are you sure you want to permanently delete the meter <strong>{{ meter.name }}</strong>?
+        Are you sure you want to permanently delete the meter <strong>{{ meter.name }}</strong>? This action cannot be undone.
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
