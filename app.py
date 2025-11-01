@@ -4392,18 +4392,23 @@ def edit_meter(meter_id):
 @permission_required('CAN_DELETE_METERS')
 def delete_meter(meter_id):
     meter = Meter.query.get_or_404(meter_id)
+
+    # Security check: Ensure user belongs to same company
     if meter.company_id != current_user.company_id:
         abort(403)
-    
+
     try:
+        MeterReading.query.filter_by(meter_id=meter.id).delete()
         delete_all_uploads(meter, 'meters')
         db.session.delete(meter)
         db.session.commit()
-        flash(f'Meter "{meter.name}" has been deleted.', 'success')
+
+        flash(f'Meter "{meter.name}" has been deleted successfully.', 'success')
+
     except Exception as e:
         db.session.rollback()
-        flash(f'An error occurred: {e}', 'danger')
-        
+        flash(f'An error occurred while deleting the meter: {e}', 'danger')
+
     return redirect(url_for('manage_meters'))
 
 @app.route('/meters/<int:meter_id>/delete-media', methods=['POST'])
